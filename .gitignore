@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Virtual Environments
+.env
+venv/
+env/
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# OS-specific
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data / model artifacts
+data/
+
+# Developer-specific configuration overrides
+config/settings.local.toml

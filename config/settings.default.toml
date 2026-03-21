@@ -1,0 +1,30 @@
+[platform]
+project_id = "i4g-ml"
+region = "us-central1"
+
+[bigquery]
+dataset_id = "i4g_ml"
+outcome_log_table = "predictions_outcome_log"
+prediction_log_table = "predictions_prediction_log"
+
+[storage]
+data_bucket = "i4g-ml-data"
+datasets_prefix = "datasets"
+models_prefix = "models"
+
+[serving]
+dev_endpoint_name = "serving-dev"
+machine_type = "n1-standard-4"
+max_replicas = 2
+min_replicas = 0
+prod_endpoint_name = "serving-prod"
+
+[training]
+default_machine_type = "n1-standard-4"
+gpu_count = 1
+gpu_machine_type = "n1-standard-4"
+gpu_type = "NVIDIA_TESLA_T4"
+
+[etl]
+batch_size = 1000
+source_db_connection = ""

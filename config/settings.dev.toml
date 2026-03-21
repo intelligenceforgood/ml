@@ -1,0 +1,8 @@
+[platform]
+# project_id = "i4g-ml"
+
+[serving]
+# dev_endpoint_name = "serving-dev"
+
+[etl]
+# source_db_connection = ""
