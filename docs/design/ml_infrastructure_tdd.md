@@ -140,7 +140,7 @@ The bucket uses Standard storage with object versioning enabled. Lifecycle polic
 
 ### 2.4 Artifact Registry
 
-A single Docker repository (`ml-containers`) hosts three container images:
+A single Docker repository (`containers`) hosts four container images:
 
 - **train-pytorch** — Gemma 2B LoRA fine-tuning on Vertex AI GPU instances
 - **train-xgboost** — Tabular feature classification
@@ -182,7 +182,6 @@ All tables live in the `i4g_ml` BigQuery dataset. Every `raw.*` table is partiti
 
 ```mermaid
 erDiagram
-    raw_cases ||--o{ raw_classification_results : "case_id"
     raw_cases ||--o{ raw_entities : "case_id"
     raw_cases ||--o{ raw_analyst_labels : "case_id"
     raw_cases ||--|| features_case_features : "case_id"
@@ -202,17 +201,8 @@ erDiagram
         string status
         timestamp created_at
         timestamp updated_at
+        json classification_result
         array tags
-    }
-
-    raw_classification_results {
-        string result_id PK
-        string case_id FK
-        string axis
-        string label_code
-        float confidence
-        string model_used
-        string prompt_version
     }
 
     raw_entities {
@@ -281,11 +271,11 @@ erDiagram
 
 ### 4.2 ETL Pipeline Design
 
-A Cloud Run Job (`ml-etl-ingest`) performs incremental sync from I4G Cloud SQL to BigQuery daily at 2 AM UTC, triggered by Cloud Scheduler. There is no runtime coupling to I4G services — the ETL reads directly from the source database via Cloud SQL Auth Proxy.
+A Cloud Run Job (`etl-ingest`) performs incremental sync from I4G Cloud SQL to BigQuery daily at 2 AM UTC, triggered by Cloud Scheduler. There is no runtime coupling to I4G services — the ETL reads directly from the source database via the Cloud SQL Python Connector with IAM authentication.
 
 ```mermaid
 flowchart LR
-    Scheduler["Cloud Scheduler<br/>(daily 2 AM)"] --> Job["Cloud Run Job<br/>ml-etl-ingest"]
+    Scheduler["Cloud Scheduler<br/>(daily 2 AM)"] --> Job["Cloud Run Job<br/>etl-ingest"]
     Job -- "Cloud SQL Auth Proxy<br/>(read-only)" --> Source[(I4G Cloud SQL)]
     Source --> Job
     Job -- "BigQuery API<br/>MERGE on PK" --> BQ[(BigQuery<br/>raw.* tables)]
@@ -297,12 +287,11 @@ flowchart LR
 
 **Source table mapping:**
 
-| Source (Cloud SQL)       | Target (BigQuery)            | Watermark column |
-| ------------------------ | ---------------------------- | ---------------- |
-| `cases`                  | `raw_cases`                  | `updated_at`     |
-| `classification_results` | `raw_classification_results` | `created_at`     |
-| `entities`               | `raw_entities`               | `created_at`     |
-| `analyst_labels`         | `raw_analyst_labels`         | `created_at`     |
+| Source (Cloud SQL) | Target (BigQuery)    | Watermark column | Notes                                 |
+| ------------------ | -------------------- | ---------------- | ------------------------------------- |
+| `cases`            | `raw_cases`          | `updated_at`     | Includes `classification_result` JSON |
+| `entities`         | `raw_entities`       | `created_at`     |                                       |
+| `analyst_labels`   | `raw_analyst_labels` | `created_at`     |                                       |
 
 ### 4.3 Feature Engineering
 
@@ -310,13 +299,13 @@ Features are computed as BigQuery SQL views that join across `raw.*` tables and 
 
 **Feature categories:**
 
-| Category           | Features                                                                                     | Source tables              |
-| ------------------ | -------------------------------------------------------------------------------------------- | -------------------------- |
-| **Text**           | text_length, word_count, avg_sentence_length, lexical_diversity                              | raw_cases                  |
-| **Entity**         | entity_count, unique_entity_types, has_crypto_wallet, has_bank_account, has_phone, has_email | raw_entities               |
-| **Classification** | current_classification_axis, current_classification_conf, classification_axis_count          | raw_classification_results |
-| **Structural**     | document_count, evidence_file_count, case_age_days, has_attachments                          | raw_cases                  |
-| **Indicator**      | indicator_count, indicator_diversity, max_indicator_confidence                               | raw_classification_results |
+| Category           | Features                                                                                     | Source tables    |
+| ------------------ | -------------------------------------------------------------------------------------------- | ---------------- |
+| **Text**           | text_length, word_count, avg_sentence_length, lexical_diversity                              | raw_cases        |
+| **Entity**         | entity_count, unique_entity_types, has_crypto_wallet, has_bank_account, has_phone, has_email | raw_entities     |
+| **Classification** | current_classification_axis, current_classification_conf, classification_axis_count          | raw_cases (JSON) |
+| **Structural**     | document_count, evidence_file_count, case_age_days, has_attachments                          | raw_cases        |
+| **Indicator**      | indicator_count, indicator_diversity, max_indicator_confidence                               | raw_cases (JSON) |
 
 ---
 
@@ -687,7 +676,7 @@ The `stacks/ml/main.tf` composes the following resources:
 
 ### 11.3 IAM
 
-The `sa-ml` service account receives the following roles in `i4g-ml`:
+The `sa-ml-platform` service account receives the following roles in `i4g-ml`:
 
 | Role                            | Purpose                                    |
 | ------------------------------- | ------------------------------------------ |
@@ -704,7 +693,7 @@ The `sa-ml` service account receives the following roles in `i4g-ml`:
 
 | Grant                         | Project   | Role                    | Purpose                          |
 | ----------------------------- | --------- | ----------------------- | -------------------------------- |
-| `sa-ml` → `i4g-dev`           | `i4g-dev` | `roles/cloudsql.client` | ETL reads from source Cloud SQL  |
+| `sa-ml-platform` → `i4g-dev`  | `i4g-dev` | `roles/cloudsql.client` | ETL reads from source Cloud SQL  |
 | `sa-core@i4g-dev` → `i4g-ml`  | `i4g-ml`  | `roles/aiplatform.user` | Dev consumer calls ML endpoints  |
 | `sa-core@i4g-prod` → `i4g-ml` | `i4g-ml`  | `roles/aiplatform.user` | Prod consumer calls ML endpoints |
 
@@ -718,8 +707,8 @@ The `sa-ml` service account receives the following roles in `i4g-ml`:
 | ----------------------------- | ------------------- | ---------------------------------------------- |
 | Consumer → ML Endpoints       | Vertex AI Endpoints | Service account IAM (Google-signed OIDC token) |
 | ML ETL Job → Source Cloud SQL | Cloud SQL           | Cloud SQL Auth Proxy + SA credentials          |
-| ML Pipelines → Vertex AI      | Vertex AI APIs      | `sa-ml` service account                        |
-| ML Pipelines → BigQuery       | BigQuery            | `sa-ml` service account                        |
+| ML Pipelines → Vertex AI      | Vertex AI APIs      | `sa-ml-platform` service account               |
+| ML Pipelines → BigQuery       | BigQuery            | `sa-ml-platform` service account               |
 | Developer → Workbench         | Vertex AI Workbench | User IAM + IAP (if enabled)                    |
 
 ### 12.2 PII Protection
@@ -747,9 +736,9 @@ All secrets are stored in GCP Secret Manager:
 
 1. Create `i4g-ml` GCP project (manual — requires org admin)
 2. Enable APIs (Terraform)
-3. Create `sa-ml` service account (Terraform)
+3. Create `sa-ml-platform` service account (Terraform)
 4. Create GCS bucket `i4g-ml-data` (Terraform)
-5. Create Artifact Registry repo `ml-containers` (Terraform)
+5. Create Artifact Registry repo `containers` (Terraform)
 6. Create BigQuery dataset `i4g_ml` (Terraform)
 7. Create BigQuery `raw.*` tables (SQL / Terraform)
 8. Create BigQuery `features.*` tables (SQL / Terraform)

@@ -35,7 +35,7 @@ black --check src/ tests/                 # format check
 - **BigQuery dataset:** `i4g_ml`
 - **GCS bucket:** `i4g-ml-data`
 - **Endpoints:** `serving-dev`, `serving-prod`
-- **Artifact Registry:** `ml-containers`
+- **Artifact Registry:** `containers`
 
 ## Coding Conventions
 

@@ -70,6 +70,10 @@ class EtlSettings(BaseModel):
     """ETL job configuration."""
 
     source_db_connection: str = ""
+    source_instance: str = ""
+    source_db_name: str = ""
+    source_db_user: str = ""
+    source_enable_iam_auth: bool = True
     batch_size: int = 1000
 
 
@@ -107,16 +111,32 @@ def _load_toml(path: Path) -> dict[str, Any]:
 
 @lru_cache
 def get_settings() -> Settings:
-    """Load settings from config files with environment variable overrides."""
+    """Load settings from config files with environment variable overrides.
+
+    Environment variables use the prefix ``I4G_ML_`` with double underscores
+    for section nesting.  For example, ``I4G_ML_ETL__SOURCE_INSTANCE`` maps to
+    ``settings.etl.source_instance``.
+    """
     root = Path(os.environ.get("I4G_ML_PROJECT_ROOT", str(_project_root())))
     config_dir = root / "config"
 
-    data: dict = {}
+    data: dict[str, dict[str, Any]] = {}
     for name in ("settings.default.toml", "settings.dev.toml", "settings.local.toml"):
         path = config_dir / name
         if path.exists():
             loaded = _load_toml(path)
             for section, values in loaded.items():
                 data.setdefault(section, {}).update(values)
+
+    # Apply environment variable overrides (I4G_ML_<SECTION>__<KEY>)
+    prefix = "I4G_ML_"
+    for key, value in os.environ.items():
+        if not key.startswith(prefix):
+            continue
+        remainder = key[len(prefix) :].lower()
+        if "__" not in remainder:
+            continue
+        section, setting = remainder.split("__", 1)
+        data.setdefault(section, {})[setting] = value
 
     return Settings(**data)

@@ -1,0 +1,8 @@
+xgboost>=2.0
+scikit-learn>=1.4
+google-cloud-bigquery>=3.10
+google-cloud-storage>=2.10
+google-cloud-aiplatform>=1.40
+pandas>=2.1
+numpy>=1.26
+pyyaml>=6.0

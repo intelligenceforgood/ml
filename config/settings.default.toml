@@ -28,3 +28,7 @@ gpu_type = "NVIDIA_TESLA_T4"
 [etl]
 batch_size = 1000
 source_db_connection = ""
+source_db_name = ""
+source_db_user = ""
+source_enable_iam_auth = true
+source_instance = ""

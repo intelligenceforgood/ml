@@ -1,0 +1,505 @@
+# PIPELINE DEFINITION
+# Name: i4g-ml-training-pipeline
+# Description: End-to-end training pipeline: data prep → train → evaluate → register → deploy
+# Inputs:
+#    capability: str [Default: 'classification']
+#    config_path: str [Default: '']
+#    container_uri: str [Default: '']
+#    dataset_id: str [Default: 'i4g_ml']
+#    dataset_version: int [Default: 1.0]
+#    endpoint_name: str [Default: 'serving-dev']
+#    experiment_name: str [Default: '']
+#    golden_set_uri: str [Default: 'gs://i4g-ml-data/datasets/classification/golden/test.jsonl']
+#    machine_type: str [Default: 'n1-standard-4']
+#    max_per_axis_regression: float [Default: 0.05]
+#    max_replicas: int [Default: 1.0]
+#    min_overall_f1: float [Default: 0.0]
+#    min_replicas: int [Default: 0.0]
+#    project_id: str [Default: 'i4g-ml']
+#    region: str [Default: 'us-central1']
+#    serving_container_uri: str [Default: '']
+components:
+  comp-deploy-model:
+    executorLabel: exec-deploy-model
+    inputDefinitions:
+      parameters:
+        endpoint_name:
+          parameterType: STRING
+        machine_type:
+          parameterType: STRING
+        max_replicas:
+          parameterType: NUMBER_INTEGER
+        min_replicas:
+          parameterType: NUMBER_INTEGER
+        model_name:
+          parameterType: STRING
+        project_id:
+          parameterType: STRING
+        region:
+          parameterType: STRING
+  comp-evaluate-model:
+    executorLabel: exec-evaluate-model
+    inputDefinitions:
+      parameters:
+        golden_set_uri:
+          parameterType: STRING
+        max_per_axis_regression:
+          parameterType: NUMBER_DOUBLE
+        min_overall_f1:
+          parameterType: NUMBER_DOUBLE
+        model_uri:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        metrics_json:
+          parameterType: STRING
+        passed:
+          parameterType: STRING
+  comp-prepare-dataset:
+    executorLabel: exec-prepare-dataset
+    inputDefinitions:
+      parameters:
+        capability:
+          parameterType: STRING
+        dataset_id:
+          parameterType: STRING
+        dataset_version:
+          parameterType: NUMBER_INTEGER
+        project_id:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-register-model:
+    executorLabel: exec-register-model
+    inputDefinitions:
+      parameters:
+        display_name:
+          parameterType: STRING
+        eval_passed:
+          parameterType: STRING
+        model_uri:
+          parameterType: STRING
+        project_id:
+          parameterType: STRING
+        region:
+          parameterType: STRING
+        serving_container_uri:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-train-model:
+    executorLabel: exec-train-model
+    inputDefinitions:
+      parameters:
+        config_path:
+          parameterType: STRING
+        container_uri:
+          parameterType: STRING
+        dataset_gcs_path:
+          parameterType: STRING
+        experiment_name:
+          parameterType: STRING
+        project_id:
+          parameterType: STRING
+        region:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+deploymentSpec:
+  executors:
+    exec-deploy-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - deploy_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform'\
+          \ && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef deploy_model(\n    project_id: str,\n    region: str,\n    model_name:\
+          \ str,\n    endpoint_name: str,\n    machine_type: str,\n    min_replicas:\
+          \ int,\n    max_replicas: int,\n) -> None:\n    \"\"\"Deploy a registered\
+          \ model to a Vertex AI Endpoint.\"\"\"\n    if model_name == \"SKIPPED\"\
+          :\n        return\n\n    from google.cloud import aiplatform\n\n    aiplatform.init(project=project_id,\
+          \ location=region)\n    model = aiplatform.Model(model_name=model_name)\n\
+          \    endpoints = aiplatform.Endpoint.list(filter=f'display_name=\"{endpoint_name}\"\
+          ')\n    if not endpoints:\n        raise ValueError(f\"Endpoint '{endpoint_name}'\
+          \ not found\")\n\n    model.deploy(\n        endpoint=endpoints[0],\n  \
+          \      machine_type=machine_type,\n        min_replica_count=min_replicas,\n\
+          \        max_replica_count=max_replicas,\n        traffic_percentage=100,\n\
+          \    )\n\n"
+        image: python:3.11-slim
+    exec-evaluate-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - evaluate_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage'\
+          \ && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef evaluate_model(\n    model_uri: str,\n    golden_set_uri: str,\n\
+          \    min_overall_f1: float,\n    max_per_axis_regression: float,\n) -> NamedTuple(\"\
+          EvalOutputs\", [(\"passed\", str), (\"metrics_json\", str)]):\n    \"\"\"\
+          Evaluate a trained model against the golden test set.\"\"\"\n    import\
+          \ json\n\n    # Phase 0: stub evaluation \u2014 real impl loads model and\
+          \ runs inference\n    metrics = {\n        \"overall_f1\": 0.0,\n      \
+          \  \"overall_precision\": 0.0,\n        \"overall_recall\": 0.0,\n     \
+          \   \"per_axis\": {},\n        \"eval_gate_passed\": True,\n    }\n\n  \
+          \  passed = \"true\" if metrics[\"eval_gate_passed\"] else \"false\"\n \
+          \   return (passed, json.dumps(metrics))\n\n"
+        image: python:3.11-slim
+    exec-prepare-dataset:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - prepare_dataset
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage'\
+          \ && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef prepare_dataset(\n    project_id: str,\n    dataset_id: str,\n\
+          \    capability: str,\n    dataset_version: int,\n) -> str:\n    \"\"\"\
+          Verify pre-exported dataset splits exist in GCS.\n\n    Returns the GCS\
+          \ path prefix for the dataset version.\n    \"\"\"\n    from google.cloud\
+          \ import storage as gcs\n\n    bucket_name = \"i4g-ml-data\"\n    prefix\
+          \ = f\"datasets/{capability}/v{dataset_version}\"\n    client = gcs.Client()\n\
+          \    bucket = client.bucket(bucket_name)\n\n    for split in (\"train\"\
+          , \"eval\", \"test\"):\n        blob = bucket.blob(f\"{prefix}/{split}.jsonl\"\
+          )\n        if not blob.exists():\n            raise FileNotFoundError(f\"\
+          Missing dataset split: gs://{bucket_name}/{prefix}/{split}.jsonl\")\n\n\
+          \    return f\"gs://{bucket_name}/{prefix}\"\n\n"
+        image: python:3.11-slim
+    exec-register-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - register_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform'\
+          \ && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef register_model(\n    project_id: str,\n    region: str,\n   \
+          \ model_uri: str,\n    display_name: str,\n    serving_container_uri: str,\n\
+          \    eval_passed: str,\n) -> str:\n    \"\"\"Register a trained model in\
+          \ Vertex AI Model Registry.\n\n    Returns the model resource name or 'SKIPPED'.\n\
+          \    \"\"\"\n    if eval_passed != \"true\":\n        return \"SKIPPED\"\
+          \n\n    from google.cloud import aiplatform\n\n    aiplatform.init(project=project_id,\
+          \ location=region)\n    model = aiplatform.Model.upload(\n        display_name=display_name,\n\
+          \        artifact_uri=model_uri,\n        serving_container_image_uri=serving_container_uri,\n\
+          \        labels={\"stage\": \"candidate\", \"capability\": \"classification\"\
+          },\n    )\n    return model.resource_name\n\n"
+        image: python:3.11-slim
+    exec-train-model:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - train_model
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform'\
+          \ && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef train_model(\n    project_id: str,\n    region: str,\n    container_uri:\
+          \ str,\n    config_path: str,\n    dataset_gcs_path: str,\n    experiment_name:\
+          \ str,\n) -> str:\n    \"\"\"Submit a Vertex AI CustomJob for model training.\n\
+          \n    Returns the GCS URI of the model artifacts.\n    \"\"\"\n    from\
+          \ google.cloud import aiplatform\n\n    aiplatform.init(project=project_id,\
+          \ location=region)\n\n    job = aiplatform.CustomJob.from_local_script(\n\
+          \        display_name=f\"train-{experiment_name}\",\n        script_path=\"\
+          train.py\",\n        container_uri=container_uri,\n        args=[\n    \
+          \        \"--config\",\n            config_path,\n            \"--dataset\"\
+          ,\n            dataset_gcs_path,\n            \"--experiment\",\n      \
+          \      experiment_name,\n        ],\n        machine_type=\"n1-standard-4\"\
+          ,\n        accelerator_type=\"NVIDIA_TESLA_T4\",\n        accelerator_count=1,\n\
+          \    )\n    job.run(experiment=experiment_name)\n\n    return f\"gs://i4g-ml-data/models/{experiment_name}/\"\
+          \n\n"
+        image: python:3.11-slim
+pipelineInfo:
+  description: "End-to-end training pipeline: data prep \u2192 train \u2192 evaluate\
+    \ \u2192 register \u2192 deploy"
+  name: i4g-ml-training-pipeline
+root:
+  dag:
+    tasks:
+      deploy-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-deploy-model
+        dependentTasks:
+        - register-model
+        inputs:
+          parameters:
+            endpoint_name:
+              componentInputParameter: endpoint_name
+            machine_type:
+              componentInputParameter: machine_type
+            max_replicas:
+              componentInputParameter: max_replicas
+            min_replicas:
+              componentInputParameter: min_replicas
+            model_name:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: register-model
+            project_id:
+              componentInputParameter: project_id
+            region:
+              componentInputParameter: region
+        taskInfo:
+          name: deploy-model
+      evaluate-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-evaluate-model
+        dependentTasks:
+        - train-model
+        inputs:
+          parameters:
+            golden_set_uri:
+              componentInputParameter: golden_set_uri
+            max_per_axis_regression:
+              componentInputParameter: max_per_axis_regression
+            min_overall_f1:
+              componentInputParameter: min_overall_f1
+            model_uri:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: train-model
+        taskInfo:
+          name: evaluate-model
+      prepare-dataset:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-prepare-dataset
+        inputs:
+          parameters:
+            capability:
+              componentInputParameter: capability
+            dataset_id:
+              componentInputParameter: dataset_id
+            dataset_version:
+              componentInputParameter: dataset_version
+            project_id:
+              componentInputParameter: project_id
+        taskInfo:
+          name: prepare-dataset
+      register-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-register-model
+        dependentTasks:
+        - evaluate-model
+        - train-model
+        inputs:
+          parameters:
+            display_name:
+              componentInputParameter: experiment_name
+            eval_passed:
+              taskOutputParameter:
+                outputParameterKey: passed
+                producerTask: evaluate-model
+            model_uri:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: train-model
+            project_id:
+              componentInputParameter: project_id
+            region:
+              componentInputParameter: region
+            serving_container_uri:
+              componentInputParameter: serving_container_uri
+        taskInfo:
+          name: register-model
+      train-model:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-model
+        dependentTasks:
+        - prepare-dataset
+        inputs:
+          parameters:
+            config_path:
+              componentInputParameter: config_path
+            container_uri:
+              componentInputParameter: container_uri
+            dataset_gcs_path:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: prepare-dataset
+            experiment_name:
+              componentInputParameter: experiment_name
+            project_id:
+              componentInputParameter: project_id
+            region:
+              componentInputParameter: region
+        taskInfo:
+          name: train-model
+  inputDefinitions:
+    parameters:
+      capability:
+        defaultValue: classification
+        isOptional: true
+        parameterType: STRING
+      config_path:
+        defaultValue: ''
+        isOptional: true
+        parameterType: STRING
+      container_uri:
+        defaultValue: ''
+        isOptional: true
+        parameterType: STRING
+      dataset_id:
+        defaultValue: i4g_ml
+        isOptional: true
+        parameterType: STRING
+      dataset_version:
+        defaultValue: 1.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      endpoint_name:
+        defaultValue: serving-dev
+        isOptional: true
+        parameterType: STRING
+      experiment_name:
+        defaultValue: ''
+        isOptional: true
+        parameterType: STRING
+      golden_set_uri:
+        defaultValue: gs://i4g-ml-data/datasets/classification/golden/test.jsonl
+        isOptional: true
+        parameterType: STRING
+      machine_type:
+        defaultValue: n1-standard-4
+        isOptional: true
+        parameterType: STRING
+      max_per_axis_regression:
+        defaultValue: 0.05
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+      max_replicas:
+        defaultValue: 1.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      min_overall_f1:
+        defaultValue: 0.0
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+      min_replicas:
+        defaultValue: 0.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      project_id:
+        defaultValue: i4g-ml
+        isOptional: true
+        parameterType: STRING
+      region:
+        defaultValue: us-central1
+        isOptional: true
+        parameterType: STRING
+      serving_container_uri:
+        defaultValue: ''
+        isOptional: true
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.13.0

@@ -5,13 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from ml.data.features import (
-    FEATURE_CATALOG,
-    ComputeMethod,
-    FeatureDefinition,
-    FeatureType,
-    get_feature_names,
-)
+from ml.data.features import FEATURE_CATALOG, ComputeMethod, FeatureDefinition, FeatureType, get_feature_names
 
 
 class TestFeatureDefinition:

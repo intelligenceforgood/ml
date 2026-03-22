@@ -1,0 +1,48 @@
+# Classification training config — Gemma 2B LoRA
+# First training run — Phase 0
+
+model_id: "classification-gemma2b-v1"
+capability: "classification"
+base_model: "google/gemma-2b"
+framework: "pytorch"
+training_type: "lora"
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.1
+  target_modules: ["q_proj", "v_proj"]
+
+hyperparameters:
+  epochs: 3
+  batch_size: 8
+  learning_rate: 0.0002
+  warmup_ratio: 0.1
+
+label_schema:
+  INTENT:
+    - INTENT.ROMANCE
+    - INTENT.INVESTMENT
+    - INTENT.IMPERSONATION
+    - INTENT.TECH_SUPPORT
+    - INTENT.SHOPPING
+    - INTENT.EMPLOYMENT
+    - INTENT.OTHER
+  CHANNEL:
+    - CHANNEL.SOCIAL_MEDIA
+    - CHANNEL.EMAIL
+    - CHANNEL.PHONE
+    - CHANNEL.WEBSITE
+    - CHANNEL.MESSAGING
+    - CHANNEL.OTHER
+
+eval_gate:
+  min_overall_f1: 0.0 # Phase 0: no minimum — just establishing baseline
+  max_per_axis_regression: 0.05
+
+resources:
+  machine_type: "n1-standard-4"
+  gpu_type: "NVIDIA_TESLA_T4"
+  gpu_count: 1
+
+data_bucket: "i4g-ml-data"
