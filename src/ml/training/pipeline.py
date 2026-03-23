@@ -92,19 +92,244 @@ def evaluate_model(
     min_overall_f1: float,
     max_per_axis_regression: float,
 ) -> NamedTuple("EvalOutputs", [("passed", str), ("metrics_json", str)]):
-    """Evaluate a trained model against the golden test set."""
-    import json
+    """Evaluate a trained model against the golden test set.
 
-    # Phase 0: stub evaluation — real impl loads model and runs inference
+    Downloads model artifacts + golden test JSONL from GCS, runs inference
+    on each sample, computes per-axis P/R/F1, and applies the eval gate.
+    """
+    import json
+    import tempfile
+    from pathlib import Path
+
+    from google.cloud import storage as gcs
+
+    # ── Download golden test set ─────────────────────────────────────────
+    def _download_gcs_file(uri: str, dest: Path) -> None:
+        """Download a single GCS object to a local path."""
+        without_scheme = uri[5:]
+        bucket_name, _, blob_path = without_scheme.partition("/")
+        client = gcs.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        blob.download_to_filename(str(dest))
+
+    def _download_gcs_prefix(uri: str, dest: Path) -> None:
+        """Download all objects under a GCS prefix to a local directory."""
+        without_scheme = uri[5:]
+        bucket_name, _, prefix = without_scheme.partition("/")
+        prefix = prefix.rstrip("/")
+        client = gcs.Client()
+        bucket = client.bucket(bucket_name)
+        blobs = list(bucket.list_blobs(prefix=prefix))
+        for blob in blobs:
+            rel = blob.name[len(prefix) :].lstrip("/")
+            if not rel:
+                continue
+            local_path = dest / rel
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            blob.download_to_filename(str(local_path))
+
+    # ── Load golden test data ────────────────────────────────────────────
+    golden_path = Path(tempfile.mkdtemp()) / "test.jsonl"
+    _download_gcs_file(golden_set_uri, golden_path)
+
+    golden_data: list[dict] = []
+    with open(golden_path) as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                golden_data.append(json.loads(line))
+
+    if not golden_data:
+        metrics = {
+            "overall_f1": 0.0,
+            "overall_precision": 0.0,
+            "overall_recall": 0.0,
+            "per_axis": {},
+            "eval_gate_passed": False,
+            "error": "Empty golden test set",
+        }
+        return ("false", json.dumps(metrics))
+
+    # ── Download and detect model ────────────────────────────────────────
+    model_dir = Path(tempfile.mkdtemp())
+    _download_gcs_prefix(model_uri.rstrip("/") + "/", model_dir)
+
+    # Load label map
+    label_map_path = model_dir / "label_map.json"
+    if not label_map_path.exists():
+        metrics = {
+            "overall_f1": 0.0,
+            "overall_precision": 0.0,
+            "overall_recall": 0.0,
+            "per_axis": {},
+            "eval_gate_passed": False,
+            "error": "label_map.json not found in model artifacts",
+        }
+        return ("false", json.dumps(metrics))
+
+    with open(label_map_path) as f:
+        label_map = json.load(f)
+
+    # Detect model type and run inference
+    is_xgboost = (model_dir / "xgboost_model.json").exists()
+    is_pytorch = (model_dir / "model").is_dir() or (model_dir / "config.json").exists()
+
+    predictions: list[dict[str, str]] = []
+    ground_truth: list[dict[str, str]] = []
+
+    if is_pytorch:
+        # Install PyTorch + transformers at runtime in this lightweight component.
+        # For KFP, this runs inside a container that has pip available.
+        import subprocess
+
+        subprocess.check_call(
+            ["pip", "install", "--quiet", "torch", "transformers"],
+            stdout=subprocess.DEVNULL,
+        )
+
+        import importlib
+
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+        torch = importlib.import_module("torch")
+
+        pt_model_dir = model_dir / "model" if (model_dir / "model").is_dir() else model_dir
+        tokenizer = AutoTokenizer.from_pretrained(str(pt_model_dir))
+        model = AutoModelForSequenceClassification.from_pretrained(str(pt_model_dir))
+        model.eval()
+
+        for sample in golden_data:
+            text = sample.get("text", "")
+            gt_labels = sample.get("labels", {})
+            ground_truth.append(gt_labels)
+
+            inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+            with torch.no_grad():
+                logits = model(**inputs).logits
+            probs = torch.softmax(logits, dim=-1).squeeze(0)
+
+            pred: dict[str, str] = {}
+            offset = 0
+            for axis, labels in label_map.items():
+                n = len(labels)
+                axis_probs = probs[offset : offset + n]
+                best_idx = int(torch.argmax(axis_probs).item())
+                pred[axis] = labels[best_idx]
+                offset += n
+            predictions.append(pred)
+
+    elif is_xgboost:
+        import subprocess
+
+        subprocess.check_call(
+            ["pip", "install", "--quiet", "xgboost", "numpy"],
+            stdout=subprocess.DEVNULL,
+        )
+        import importlib
+
+        xgb = importlib.import_module("xgboost")
+        np = importlib.import_module("numpy")
+
+        booster = xgb.Booster()
+        booster.load_model(str(model_dir / "xgboost_model.json"))
+
+        for sample in golden_data:
+            gt_labels = sample.get("labels", {})
+            ground_truth.append(gt_labels)
+
+            features = sample.get("features", {})
+            feature_keys = sorted(features.keys())
+            values = [float(features.get(k, 0)) for k in feature_keys]
+            dmat = xgb.DMatrix(np.array([values], dtype=np.float32), feature_names=feature_keys)
+            raw_pred = booster.predict(dmat)
+
+            pred: dict[str, str] = {}
+            offset = 0
+            for axis, labels in label_map.items():
+                n = len(labels)
+                axis_probs = raw_pred[0][offset : offset + n] if raw_pred.ndim > 1 else raw_pred[offset : offset + n]
+                best_idx = int(np.argmax(axis_probs))
+                pred[axis] = labels[best_idx]
+                offset += n
+            predictions.append(pred)
+
+    else:
+        metrics = {
+            "overall_f1": 0.0,
+            "overall_precision": 0.0,
+            "overall_recall": 0.0,
+            "per_axis": {},
+            "eval_gate_passed": False,
+            "error": "Unknown model type in artifacts",
+        }
+        return ("false", json.dumps(metrics))
+
+    # ── Compute metrics (inline — avoids importing ml package in KFP) ────
+    all_axes: set[str] = set()
+    for gt in ground_truth:
+        all_axes.update(gt.keys())
+
+    axis_tp: dict[str, int] = {a: 0 for a in all_axes}
+    axis_fp: dict[str, int] = {a: 0 for a in all_axes}
+    axis_fn: dict[str, int] = {a: 0 for a in all_axes}
+    axis_support: dict[str, int] = {a: 0 for a in all_axes}
+
+    for pred_item, gt_item in zip(predictions, ground_truth, strict=False):
+        for axis in all_axes:
+            gt_label = gt_item.get(axis)
+            pred_label = pred_item.get(axis)
+            if gt_label is not None:
+                axis_support[axis] += 1
+                if pred_label == gt_label:
+                    axis_tp[axis] += 1
+                else:
+                    axis_fn[axis] += 1
+                    if pred_label is not None:
+                        axis_fp[axis] += 1
+            elif pred_label is not None:
+                axis_fp[axis] += 1
+
+    per_axis: dict[str, dict[str, float]] = {}
+    f1_scores: list[float] = []
+    precisions: list[float] = []
+    recalls: list[float] = []
+    weights: list[int] = []
+
+    for axis in sorted(all_axes):
+        tp, fp, fn = axis_tp[axis], axis_fp[axis], axis_fn[axis]
+        p = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        r = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1 = (2 * p * r) / (p + r) if (p + r) > 0 else 0.0
+        support = axis_support[axis]
+        per_axis[axis] = {"precision": p, "recall": r, "f1": f1, "support": support}
+        f1_scores.append(f1)
+        precisions.append(p)
+        recalls.append(r)
+        weights.append(support)
+
+    total_weight = sum(weights)
+    if total_weight > 0:
+        overall_f1 = sum(f * w for f, w in zip(f1_scores, weights, strict=False)) / total_weight
+        overall_p = sum(p * w for p, w in zip(precisions, weights, strict=False)) / total_weight
+        overall_r = sum(r * w for r, w in zip(recalls, weights, strict=False)) / total_weight
+    else:
+        overall_f1 = overall_p = overall_r = 0.0
+
+    # ── Eval gate ────────────────────────────────────────────────────────
+    gate_passed = overall_f1 >= min_overall_f1
+
     metrics = {
-        "overall_f1": 0.0,
-        "overall_precision": 0.0,
-        "overall_recall": 0.0,
-        "per_axis": {},
-        "eval_gate_passed": True,
+        "overall_f1": overall_f1,
+        "overall_precision": overall_p,
+        "overall_recall": overall_r,
+        "per_axis": per_axis,
+        "total_samples": len(predictions),
+        "eval_gate_passed": gate_passed,
     }
 
-    passed = "true" if metrics["eval_gate_passed"] else "false"
+    passed = "true" if gate_passed else "false"
     return (passed, json.dumps(metrics))
 
 

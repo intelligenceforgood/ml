@@ -183,13 +183,140 @@ deploymentSpec:
           \ *\n\ndef evaluate_model(\n    model_uri: str,\n    golden_set_uri: str,\n\
           \    min_overall_f1: float,\n    max_per_axis_regression: float,\n) -> NamedTuple(\"\
           EvalOutputs\", [(\"passed\", str), (\"metrics_json\", str)]):\n    \"\"\"\
-          Evaluate a trained model against the golden test set.\"\"\"\n    import\
-          \ json\n\n    # Phase 0: stub evaluation \u2014 real impl loads model and\
-          \ runs inference\n    metrics = {\n        \"overall_f1\": 0.0,\n      \
-          \  \"overall_precision\": 0.0,\n        \"overall_recall\": 0.0,\n     \
-          \   \"per_axis\": {},\n        \"eval_gate_passed\": True,\n    }\n\n  \
-          \  passed = \"true\" if metrics[\"eval_gate_passed\"] else \"false\"\n \
-          \   return (passed, json.dumps(metrics))\n\n"
+          Evaluate a trained model against the golden test set.\n\n    Downloads model\
+          \ artifacts + golden test JSONL from GCS, runs inference\n    on each sample,\
+          \ computes per-axis P/R/F1, and applies the eval gate.\n    \"\"\"\n   \
+          \ import json\n    import os\n    import tempfile\n    from pathlib import\
+          \ Path\n\n    from google.cloud import storage as gcs\n\n    # \u2500\u2500\
+          \ Download golden test set \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    def _download_gcs_file(uri:\
+          \ str, dest: Path) -> None:\n        \"\"\"Download a single GCS object\
+          \ to a local path.\"\"\"\n        without_scheme = uri[5:]\n        bucket_name,\
+          \ _, blob_path = without_scheme.partition(\"/\")\n        client = gcs.Client()\n\
+          \        bucket = client.bucket(bucket_name)\n        blob = bucket.blob(blob_path)\n\
+          \        dest.parent.mkdir(parents=True, exist_ok=True)\n        blob.download_to_filename(str(dest))\n\
+          \n    def _download_gcs_prefix(uri: str, dest: Path) -> None:\n        \"\
+          \"\"Download all objects under a GCS prefix to a local directory.\"\"\"\n\
+          \        without_scheme = uri[5:]\n        bucket_name, _, prefix = without_scheme.partition(\"\
+          /\")\n        prefix = prefix.rstrip(\"/\")\n        client = gcs.Client()\n\
+          \        bucket = client.bucket(bucket_name)\n        blobs = list(bucket.list_blobs(prefix=prefix))\n\
+          \        for blob in blobs:\n            rel = blob.name[len(prefix):].lstrip(\"\
+          /\")\n            if not rel:\n                continue\n            local_path\
+          \ = dest / rel\n            local_path.parent.mkdir(parents=True, exist_ok=True)\n\
+          \            blob.download_to_filename(str(local_path))\n\n    # \u2500\u2500\
+          \ Load golden test data \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \n    golden_path = Path(tempfile.mkdtemp()) / \"test.jsonl\"\n    _download_gcs_file(golden_set_uri,\
+          \ golden_path)\n\n    golden_data: list[dict] = []\n    with open(golden_path)\
+          \ as f:\n        for line in f:\n            line = line.strip()\n     \
+          \       if line:\n                golden_data.append(json.loads(line))\n\
+          \n    if not golden_data:\n        metrics = {\n            \"overall_f1\"\
+          : 0.0,\n            \"overall_precision\": 0.0,\n            \"overall_recall\"\
+          : 0.0,\n            \"per_axis\": {},\n            \"eval_gate_passed\"\
+          : False,\n            \"error\": \"Empty golden test set\",\n        }\n\
+          \        return (\"false\", json.dumps(metrics))\n\n    # \u2500\u2500 Download\
+          \ and detect model \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    model_dir = Path(tempfile.mkdtemp())\n\
+          \    _download_gcs_prefix(model_uri.rstrip(\"/\") + \"/\", model_dir)\n\n\
+          \    # Load label map\n    label_map_path = model_dir / \"label_map.json\"\
+          \n    if not label_map_path.exists():\n        metrics = {\n           \
+          \ \"overall_f1\": 0.0,\n            \"overall_precision\": 0.0,\n      \
+          \      \"overall_recall\": 0.0,\n            \"per_axis\": {},\n       \
+          \     \"eval_gate_passed\": False,\n            \"error\": \"label_map.json\
+          \ not found in model artifacts\",\n        }\n        return (\"false\"\
+          , json.dumps(metrics))\n\n    with open(label_map_path) as f:\n        label_map\
+          \ = json.load(f)\n\n    # Detect model type and run inference\n    is_xgboost\
+          \ = (model_dir / \"xgboost_model.json\").exists()\n    is_pytorch = (model_dir\
+          \ / \"model\").is_dir() or (model_dir / \"config.json\").exists()\n\n  \
+          \  predictions: list[dict[str, str]] = []\n    ground_truth: list[dict[str,\
+          \ str]] = []\n\n    if is_pytorch:\n        # Install PyTorch + transformers\
+          \ at runtime in this lightweight component.\n        # For KFP, this runs\
+          \ inside a container that has pip available.\n        import subprocess\n\
+          \        subprocess.check_call(\n            [\"pip\", \"install\", \"--quiet\"\
+          , \"torch\", \"transformers\"],\n            stdout=subprocess.DEVNULL,\n\
+          \        )\n\n        from transformers import AutoModelForSequenceClassification,\
+          \ AutoTokenizer\n        import importlib\n        torch = importlib.import_module(\"\
+          torch\")\n\n        pt_model_dir = model_dir / \"model\" if (model_dir /\
+          \ \"model\").is_dir() else model_dir\n        tokenizer = AutoTokenizer.from_pretrained(str(pt_model_dir))\n\
+          \        model = AutoModelForSequenceClassification.from_pretrained(str(pt_model_dir))\n\
+          \        model.eval()\n\n        for sample in golden_data:\n          \
+          \  text = sample.get(\"text\", \"\")\n            gt_labels = sample.get(\"\
+          labels\", {})\n            ground_truth.append(gt_labels)\n\n          \
+          \  inputs = tokenizer(text, return_tensors=\"pt\", truncation=True, max_length=512)\n\
+          \            with torch.no_grad():\n                logits = model(**inputs).logits\n\
+          \            probs = torch.softmax(logits, dim=-1).squeeze(0)\n\n      \
+          \      pred: dict[str, str] = {}\n            offset = 0\n            for\
+          \ axis, labels in label_map.items():\n                n = len(labels)\n\
+          \                axis_probs = probs[offset:offset + n]\n               \
+          \ best_idx = int(torch.argmax(axis_probs).item())\n                pred[axis]\
+          \ = labels[best_idx]\n                offset += n\n            predictions.append(pred)\n\
+          \n    elif is_xgboost:\n        import subprocess\n        subprocess.check_call(\n\
+          \            [\"pip\", \"install\", \"--quiet\", \"xgboost\", \"numpy\"\
+          ],\n            stdout=subprocess.DEVNULL,\n        )\n        import importlib\n\
+          \        xgb = importlib.import_module(\"xgboost\")\n        np = importlib.import_module(\"\
+          numpy\")\n\n        booster = xgb.Booster()\n        booster.load_model(str(model_dir\
+          \ / \"xgboost_model.json\"))\n\n        for sample in golden_data:\n   \
+          \         gt_labels = sample.get(\"labels\", {})\n            ground_truth.append(gt_labels)\n\
+          \n            features = sample.get(\"features\", {})\n            feature_keys\
+          \ = sorted(features.keys())\n            values = [float(features.get(k,\
+          \ 0)) for k in feature_keys]\n            dmat = xgb.DMatrix(np.array([values],\
+          \ dtype=np.float32), feature_names=feature_keys)\n            raw_pred =\
+          \ booster.predict(dmat)\n\n            pred: dict[str, str] = {}\n     \
+          \       offset = 0\n            for axis, labels in label_map.items():\n\
+          \                n = len(labels)\n                axis_probs = raw_pred[0][offset:offset\
+          \ + n] if raw_pred.ndim > 1 else raw_pred[offset:offset + n]\n         \
+          \       best_idx = int(np.argmax(axis_probs))\n                pred[axis]\
+          \ = labels[best_idx]\n                offset += n\n            predictions.append(pred)\n\
+          \n    else:\n        metrics = {\n            \"overall_f1\": 0.0,\n   \
+          \         \"overall_precision\": 0.0,\n            \"overall_recall\": 0.0,\n\
+          \            \"per_axis\": {},\n            \"eval_gate_passed\": False,\n\
+          \            \"error\": \"Unknown model type in artifacts\",\n        }\n\
+          \        return (\"false\", json.dumps(metrics))\n\n    # \u2500\u2500 Compute\
+          \ metrics (inline \u2014 avoids importing ml package in KFP) \u2500\u2500\
+          \u2500\u2500\n    all_axes: set[str] = set()\n    for gt in ground_truth:\n\
+          \        all_axes.update(gt.keys())\n\n    axis_tp: dict[str, int] = {a:\
+          \ 0 for a in all_axes}\n    axis_fp: dict[str, int] = {a: 0 for a in all_axes}\n\
+          \    axis_fn: dict[str, int] = {a: 0 for a in all_axes}\n    axis_support:\
+          \ dict[str, int] = {a: 0 for a in all_axes}\n\n    for pred_item, gt_item\
+          \ in zip(predictions, ground_truth):\n        for axis in all_axes:\n  \
+          \          gt_label = gt_item.get(axis)\n            pred_label = pred_item.get(axis)\n\
+          \            if gt_label is not None:\n                axis_support[axis]\
+          \ += 1\n                if pred_label == gt_label:\n                   \
+          \ axis_tp[axis] += 1\n                else:\n                    axis_fn[axis]\
+          \ += 1\n                    if pred_label is not None:\n               \
+          \         axis_fp[axis] += 1\n            elif pred_label is not None:\n\
+          \                axis_fp[axis] += 1\n\n    per_axis: dict[str, dict[str,\
+          \ float]] = {}\n    f1_scores: list[float] = []\n    precisions: list[float]\
+          \ = []\n    recalls: list[float] = []\n    weights: list[int] = []\n\n \
+          \   for axis in sorted(all_axes):\n        tp, fp, fn = axis_tp[axis], axis_fp[axis],\
+          \ axis_fn[axis]\n        p = tp / (tp + fp) if (tp + fp) > 0 else 0.0\n\
+          \        r = tp / (tp + fn) if (tp + fn) > 0 else 0.0\n        f1 = (2 *\
+          \ p * r) / (p + r) if (p + r) > 0 else 0.0\n        support = axis_support[axis]\n\
+          \        per_axis[axis] = {\"precision\": p, \"recall\": r, \"f1\": f1,\
+          \ \"support\": support}\n        f1_scores.append(f1)\n        precisions.append(p)\n\
+          \        recalls.append(r)\n        weights.append(support)\n\n    total_weight\
+          \ = sum(weights)\n    if total_weight > 0:\n        overall_f1 = sum(f *\
+          \ w for f, w in zip(f1_scores, weights)) / total_weight\n        overall_p\
+          \ = sum(p * w for p, w in zip(precisions, weights)) / total_weight\n   \
+          \     overall_r = sum(r * w for r, w in zip(recalls, weights)) / total_weight\n\
+          \    else:\n        overall_f1 = overall_p = overall_r = 0.0\n\n    # \u2500\
+          \u2500 Eval gate \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    gate_passed\
+          \ = overall_f1 >= min_overall_f1\n\n    metrics = {\n        \"overall_f1\"\
+          : overall_f1,\n        \"overall_precision\": overall_p,\n        \"overall_recall\"\
+          : overall_r,\n        \"per_axis\": per_axis,\n        \"total_samples\"\
+          : len(predictions),\n        \"eval_gate_passed\": gate_passed,\n    }\n\
+          \n    passed = \"true\" if gate_passed else \"false\"\n    return (passed,\
+          \ json.dumps(metrics))\n\n"
         image: python:3.11-slim
     exec-prepare-dataset:
       container:

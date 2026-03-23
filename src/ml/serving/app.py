@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 from ml.serving.logging import log_outcome, log_prediction
-from ml.serving.predict import classify_text, load_model
+from ml.serving.predict import _LOAD_FAILED, classify_text, load_model
 
 logger = logging.getLogger(__name__)
 
@@ -84,8 +84,9 @@ async def health() -> HealthResponse:
     """Return server health status and loaded model identifier."""
     from ml.serving.predict import _MODEL_STATE
 
+    status = "healthy" if not _LOAD_FAILED else "degraded"
     return HealthResponse(
-        status="healthy",
+        status=status,
         model_id=_MODEL_STATE.get("model_id"),
     )
 
@@ -96,6 +97,9 @@ async def predict_classify(request: Request) -> dict[str, Any]:
     body = await request.json()
 
     # Vertex AI wraps payload as {"instances": [...]}, direct format otherwise
+    if _LOAD_FAILED:
+        raise HTTPException(status_code=503, detail="Model failed to load — serving unavailable")
+
     instances = body.get("instances", [body])
 
     predictions = []
