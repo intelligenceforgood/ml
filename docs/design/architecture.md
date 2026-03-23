@@ -73,8 +73,14 @@ graph TB
    tables with computed features) into the `features_case_features` table.
 
 3. **Dataset Creation** — `create_dataset_version()` joins features with analyst labels, validates the
-   dataset (min samples, class balance, null rates), performs stratified 70/15/15 split, exports JSONL to
-   GCS, and registers the version in `training_dataset_registry`.
+   dataset (min samples, class balance, null rates), **redacts PII** from text fields (emails, phones,
+   SSNs, credit card numbers, IPs), performs stratified 70/15/15 split, exports JSONL to GCS, and registers
+   the version in `training_dataset_registry`. Redaction status is recorded in the dataset registry
+   (`redacted: bool` field) and in the dataset config JSON.
+
+   PII redaction uses regex-based pattern matching (`ml.data.pii.redact_pii`) and replaces sensitive data
+   with placeholder tokens (`[EMAIL]`, `[PHONE]`, `[SSN]`, `[CC]`, `[IP]`). Phase 2+ will integrate
+   Google Cloud DLP for production-grade detection.
 
 4. **Training** — KFP v2 pipeline runs on Vertex AI with 5 stages: prepare_dataset → train_model →
    evaluate_model → register_model → deploy_model. Supports Gemma 2B LoRA (PyTorch) and XGBoost (tabular)
@@ -115,3 +121,24 @@ graph TB
 | Logging    | `src/ml/serving/logging.py`     | BQ prediction/outcome logging         |
 | Features   | `src/ml/serving/features.py`    | Inline feature computation            |
 | Config     | `src/ml/training/config.py`     | TrainingConfig Pydantic model         |
+| Refresh    | `src/ml/data/refresh.py`        | Automated dataset refresh pipeline    |
+
+## Framework Selection Criteria
+
+The platform supports two training frameworks. Selection depends on the use case:
+
+| Criterion         | XGBoost (Tabular)                 | PyTorch — Gemma 2B LoRA               |
+| ----------------- | --------------------------------- | ------------------------------------- |
+| **Input**         | Pre-computed BigQuery features    | Raw narrative text                    |
+| **Training time** | < 10 min (CPU)                    | 30–60 min (GPU)                       |
+| **Cost / run**    | ~$0.50 (n1-standard-4, no GPU)    | ~$5–10 (T4 GPU)                       |
+| **Cold start**    | < 1 s                             | 5–10 s (model + tokenizer load)       |
+| **Accuracy**      | Good baseline for structured data | Higher ceiling with rich text signals |
+| **When to use**   | Rapid iteration, cost-sensitive   | Production accuracy, text-heavy cases |
+
+**Decision rule:** Start with XGBoost for fast iteration and baseline metrics. Switch to PyTorch
+when XGBoost plateaus and the accuracy gap justifies the GPU cost. Both frameworks share the same
+label schema, eval gate thresholds, and promotion criteria — so they are interchangeable in the
+pipeline.
+
+Use `scripts/compare_frameworks.py` to compare evaluation metrics side-by-side.
