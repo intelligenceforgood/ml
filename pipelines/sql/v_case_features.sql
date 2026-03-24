@@ -9,21 +9,21 @@
 
 CREATE OR REPLACE VIEW `i4g-ml.i4g_ml.v_case_features` AS
 SELECT
-    c.case_id,
-    CAST(NULL AS INT64)   AS text_length,
-    CAST(NULL AS INT64)   AS word_count,
-    CAST(NULL AS FLOAT64) AS avg_sentence_length,
-    COALESCE(ent.entity_count, 0)          AS entity_count,
-    COALESCE(ent.unique_entity_types, 0)   AS unique_entity_types,
-    COALESCE(ent.has_crypto_wallet, FALSE) AS has_crypto_wallet,
-    COALESCE(ent.has_bank_account, FALSE)  AS has_bank_account,
-    COALESCE(ent.has_phone, FALSE)         AS has_phone,
-    COALESCE(ent.has_email, FALSE)         AS has_email,
-    CAST(NULL AS INT64)   AS indicator_count,
-    CAST(NULL AS INT64)   AS indicator_diversity,
-    CAST(NULL AS FLOAT64) AS max_indicator_confidence,
-    JSON_EXTRACT_SCALAR(c.classification_result, '$.classification') AS current_classification_axis,
-    COALESCE(SAFE_CAST(JSON_EXTRACT_SCALAR(c.classification_result, '$.confidence') AS FLOAT64), 0.0) AS current_classification_conf,
+  c.case_id,
+  CAST(NULL AS INT64)   AS text_length,
+  CAST(NULL AS INT64)   AS word_count,
+  CAST(NULL AS FLOAT64) AS avg_sentence_length,
+  COALESCE(ent.entity_count, 0)          AS entity_count,
+  COALESCE(ent.unique_entity_types, 0)   AS unique_entity_types,
+  COALESCE(ent.has_crypto_wallet, FALSE) AS has_crypto_wallet,
+  COALESCE(ent.has_bank_account, FALSE)  AS has_bank_account,
+  COALESCE(ent.has_phone, FALSE)         AS has_phone,
+  COALESCE(ent.has_email, FALSE)         AS has_email,
+  CAST(NULL AS INT64)   AS indicator_count,
+  CAST(NULL AS INT64)   AS indicator_diversity,
+  CAST(NULL AS FLOAT64) AS max_indicator_confidence,
+  JSON_EXTRACT_SCALAR(c.classification_result, '$.classification') AS current_classification_axis,
+  COALESCE(SAFE_CAST(JSON_EXTRACT_SCALAR(c.classification_result, '$.confidence') AS FLOAT64), 0.0) AS current_classification_conf,
 IF(JSON_EXTRACT(c.classification_result, '$.intent') IS NOT NULL, 1, 0) +
 IF(JSON_EXTRACT(c.classification_result, '$.channel') IS NOT NULL, 1, 0) +
 IF(JSON_EXTRACT(c.classification_result, '$.techniques') IS NOT NULL, 1, 0) +
@@ -46,6 +46,7 @@ FROM `i4g-ml.i4g_ml.raw_cases` c
 LEFT JOIN
 (
   SELECT case_id, COUNT(*) AS entity_count, COUNT(DISTINCT entity_type) AS unique_entity_types, LOGICAL_OR(entity_type = 'crypto_wallet') AS has_crypto_wallet, LOGICAL_OR(entity_type = 'bank_account') AS has_bank_account, LOGICAL_OR(entity_type = 'phone') AS has_phone, LOGICAL_OR(entity_type = 'email') AS has_email
-FROM `i4g-ml.i4g_ml.raw_entities`
+FROM `i4g
+-ml.i4g_ml.raw_entities`
   GROUP BY case_id
 ) ent ON c.case_id = ent.case_id
