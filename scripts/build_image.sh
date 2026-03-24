@@ -20,6 +20,12 @@ Positional arguments:
   name                  Image/Dockerfile base name (e.g. train-pytorch, serve)
   tag                   Image tag suffix (e.g. dev, prod, latest)
 
+Examples:
+  scripts/build_image.sh pipeline-base dev   # shared KFP component base image
+  scripts/build_image.sh train-pytorch dev
+  scripts/build_image.sh train-xgboost dev
+  scripts/build_image.sh serve dev
+
 Options:
   -f, --dockerfile PATH    Override Dockerfile path (default: docker/<name>.Dockerfile)
   -i, --image IMAGE        Override full image tag

@@ -126,9 +126,8 @@ deploymentSpec:
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
           \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
-          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
-          \  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform'\
-          \ && \"$0\" \"$@\"\n"
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
         - sh
         - -ec
         - 'program_path=$(mktemp -d)
@@ -152,7 +151,7 @@ deploymentSpec:
           \      machine_type=machine_type,\n        min_replica_count=min_replicas,\n\
           \        max_replica_count=max_replicas,\n        traffic_percentage=100,\n\
           \    )\n\n"
-        image: python:3.11-slim
+        image: us-central1-docker.pkg.dev/i4g-ml/containers/pipeline-base:dev
     exec-evaluate-model:
       container:
         args:
@@ -166,9 +165,8 @@ deploymentSpec:
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
           \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
-          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
-          \  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage'\
-          \ && \"$0\" \"$@\"\n"
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
         - sh
         - -ec
         - 'program_path=$(mktemp -d)
@@ -186,12 +184,12 @@ deploymentSpec:
           Evaluate a trained model against the golden test set.\n\n    Downloads model\
           \ artifacts + golden test JSONL from GCS, runs inference\n    on each sample,\
           \ computes per-axis P/R/F1, and applies the eval gate.\n    \"\"\"\n   \
-          \ import json\n    import os\n    import tempfile\n    from pathlib import\
-          \ Path\n\n    from google.cloud import storage as gcs\n\n    # \u2500\u2500\
-          \ Download golden test set \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \ import json\n    import tempfile\n    from pathlib import Path\n\n   \
+          \ from google.cloud import storage as gcs\n\n    # \u2500\u2500 Download\
+          \ golden test set \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
           \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
           \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
-          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    def _download_gcs_file(uri:\
+          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    def _download_gcs_file(uri:\
           \ str, dest: Path) -> None:\n        \"\"\"Download a single GCS object\
           \ to a local path.\"\"\"\n        without_scheme = uri[5:]\n        bucket_name,\
           \ _, blob_path = without_scheme.partition(\"/\")\n        client = gcs.Client()\n\
@@ -202,7 +200,7 @@ deploymentSpec:
           \        without_scheme = uri[5:]\n        bucket_name, _, prefix = without_scheme.partition(\"\
           /\")\n        prefix = prefix.rstrip(\"/\")\n        client = gcs.Client()\n\
           \        bucket = client.bucket(bucket_name)\n        blobs = list(bucket.list_blobs(prefix=prefix))\n\
-          \        for blob in blobs:\n            rel = blob.name[len(prefix):].lstrip(\"\
+          \        for blob in blobs:\n            rel = blob.name[len(prefix) :].lstrip(\"\
           /\")\n            if not rel:\n                continue\n            local_path\
           \ = dest / rel\n            local_path.parent.mkdir(parents=True, exist_ok=True)\n\
           \            blob.download_to_filename(str(local_path))\n\n    # \u2500\u2500\
@@ -238,10 +236,10 @@ deploymentSpec:
           \ str]] = []\n\n    if is_pytorch:\n        # Install PyTorch + transformers\
           \ at runtime in this lightweight component.\n        # For KFP, this runs\
           \ inside a container that has pip available.\n        import subprocess\n\
-          \        subprocess.check_call(\n            [\"pip\", \"install\", \"--quiet\"\
-          , \"torch\", \"transformers\"],\n            stdout=subprocess.DEVNULL,\n\
-          \        )\n\n        from transformers import AutoModelForSequenceClassification,\
-          \ AutoTokenizer\n        import importlib\n        torch = importlib.import_module(\"\
+          \n        subprocess.check_call(\n            [\"pip\", \"install\", \"\
+          --quiet\", \"torch\", \"transformers\"],\n            stdout=subprocess.DEVNULL,\n\
+          \        )\n\n        import importlib\n\n        from transformers import\
+          \ AutoModelForSequenceClassification, AutoTokenizer\n\n        torch = importlib.import_module(\"\
           torch\")\n\n        pt_model_dir = model_dir / \"model\" if (model_dir /\
           \ \"model\").is_dir() else model_dir\n        tokenizer = AutoTokenizer.from_pretrained(str(pt_model_dir))\n\
           \        model = AutoModelForSequenceClassification.from_pretrained(str(pt_model_dir))\n\
@@ -253,13 +251,13 @@ deploymentSpec:
           \            probs = torch.softmax(logits, dim=-1).squeeze(0)\n\n      \
           \      pred: dict[str, str] = {}\n            offset = 0\n            for\
           \ axis, labels in label_map.items():\n                n = len(labels)\n\
-          \                axis_probs = probs[offset:offset + n]\n               \
-          \ best_idx = int(torch.argmax(axis_probs).item())\n                pred[axis]\
+          \                axis_probs = probs[offset : offset + n]\n             \
+          \   best_idx = int(torch.argmax(axis_probs).item())\n                pred[axis]\
           \ = labels[best_idx]\n                offset += n\n            predictions.append(pred)\n\
-          \n    elif is_xgboost:\n        import subprocess\n        subprocess.check_call(\n\
+          \n    elif is_xgboost:\n        import subprocess\n\n        subprocess.check_call(\n\
           \            [\"pip\", \"install\", \"--quiet\", \"xgboost\", \"numpy\"\
           ],\n            stdout=subprocess.DEVNULL,\n        )\n        import importlib\n\
-          \        xgb = importlib.import_module(\"xgboost\")\n        np = importlib.import_module(\"\
+          \n        xgb = importlib.import_module(\"xgboost\")\n        np = importlib.import_module(\"\
           numpy\")\n\n        booster = xgb.Booster()\n        booster.load_model(str(model_dir\
           \ / \"xgboost_model.json\"))\n\n        for sample in golden_data:\n   \
           \         gt_labels = sample.get(\"labels\", {})\n            ground_truth.append(gt_labels)\n\
@@ -269,55 +267,56 @@ deploymentSpec:
           \ dtype=np.float32), feature_names=feature_keys)\n            raw_pred =\
           \ booster.predict(dmat)\n\n            pred: dict[str, str] = {}\n     \
           \       offset = 0\n            for axis, labels in label_map.items():\n\
-          \                n = len(labels)\n                axis_probs = raw_pred[0][offset:offset\
-          \ + n] if raw_pred.ndim > 1 else raw_pred[offset:offset + n]\n         \
-          \       best_idx = int(np.argmax(axis_probs))\n                pred[axis]\
-          \ = labels[best_idx]\n                offset += n\n            predictions.append(pred)\n\
-          \n    else:\n        metrics = {\n            \"overall_f1\": 0.0,\n   \
-          \         \"overall_precision\": 0.0,\n            \"overall_recall\": 0.0,\n\
-          \            \"per_axis\": {},\n            \"eval_gate_passed\": False,\n\
-          \            \"error\": \"Unknown model type in artifacts\",\n        }\n\
-          \        return (\"false\", json.dumps(metrics))\n\n    # \u2500\u2500 Compute\
-          \ metrics (inline \u2014 avoids importing ml package in KFP) \u2500\u2500\
-          \u2500\u2500\n    all_axes: set[str] = set()\n    for gt in ground_truth:\n\
-          \        all_axes.update(gt.keys())\n\n    axis_tp: dict[str, int] = {a:\
-          \ 0 for a in all_axes}\n    axis_fp: dict[str, int] = {a: 0 for a in all_axes}\n\
-          \    axis_fn: dict[str, int] = {a: 0 for a in all_axes}\n    axis_support:\
-          \ dict[str, int] = {a: 0 for a in all_axes}\n\n    for pred_item, gt_item\
-          \ in zip(predictions, ground_truth):\n        for axis in all_axes:\n  \
-          \          gt_label = gt_item.get(axis)\n            pred_label = pred_item.get(axis)\n\
-          \            if gt_label is not None:\n                axis_support[axis]\
-          \ += 1\n                if pred_label == gt_label:\n                   \
-          \ axis_tp[axis] += 1\n                else:\n                    axis_fn[axis]\
-          \ += 1\n                    if pred_label is not None:\n               \
-          \         axis_fp[axis] += 1\n            elif pred_label is not None:\n\
-          \                axis_fp[axis] += 1\n\n    per_axis: dict[str, dict[str,\
-          \ float]] = {}\n    f1_scores: list[float] = []\n    precisions: list[float]\
-          \ = []\n    recalls: list[float] = []\n    weights: list[int] = []\n\n \
-          \   for axis in sorted(all_axes):\n        tp, fp, fn = axis_tp[axis], axis_fp[axis],\
-          \ axis_fn[axis]\n        p = tp / (tp + fp) if (tp + fp) > 0 else 0.0\n\
-          \        r = tp / (tp + fn) if (tp + fn) > 0 else 0.0\n        f1 = (2 *\
-          \ p * r) / (p + r) if (p + r) > 0 else 0.0\n        support = axis_support[axis]\n\
-          \        per_axis[axis] = {\"precision\": p, \"recall\": r, \"f1\": f1,\
-          \ \"support\": support}\n        f1_scores.append(f1)\n        precisions.append(p)\n\
-          \        recalls.append(r)\n        weights.append(support)\n\n    total_weight\
-          \ = sum(weights)\n    if total_weight > 0:\n        overall_f1 = sum(f *\
-          \ w for f, w in zip(f1_scores, weights)) / total_weight\n        overall_p\
-          \ = sum(p * w for p, w in zip(precisions, weights)) / total_weight\n   \
-          \     overall_r = sum(r * w for r, w in zip(recalls, weights)) / total_weight\n\
-          \    else:\n        overall_f1 = overall_p = overall_r = 0.0\n\n    # \u2500\
-          \u2500 Eval gate \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \                n = len(labels)\n                axis_probs = raw_pred[0][offset\
+          \ : offset + n] if raw_pred.ndim > 1 else raw_pred[offset : offset + n]\n\
+          \                best_idx = int(np.argmax(axis_probs))\n               \
+          \ pred[axis] = labels[best_idx]\n                offset += n\n         \
+          \   predictions.append(pred)\n\n    else:\n        metrics = {\n       \
+          \     \"overall_f1\": 0.0,\n            \"overall_precision\": 0.0,\n  \
+          \          \"overall_recall\": 0.0,\n            \"per_axis\": {},\n   \
+          \         \"eval_gate_passed\": False,\n            \"error\": \"Unknown\
+          \ model type in artifacts\",\n        }\n        return (\"false\", json.dumps(metrics))\n\
+          \n    # \u2500\u2500 Compute metrics (inline \u2014 avoids importing ml\
+          \ package in KFP) \u2500\u2500\u2500\u2500\n    all_axes: set[str] = set()\n\
+          \    for gt in ground_truth:\n        all_axes.update(gt.keys())\n\n   \
+          \ axis_tp: dict[str, int] = {a: 0 for a in all_axes}\n    axis_fp: dict[str,\
+          \ int] = {a: 0 for a in all_axes}\n    axis_fn: dict[str, int] = {a: 0 for\
+          \ a in all_axes}\n    axis_support: dict[str, int] = {a: 0 for a in all_axes}\n\
+          \n    for pred_item, gt_item in zip(predictions, ground_truth, strict=False):\n\
+          \        for axis in all_axes:\n            gt_label = gt_item.get(axis)\n\
+          \            pred_label = pred_item.get(axis)\n            if gt_label is\
+          \ not None:\n                axis_support[axis] += 1\n                if\
+          \ pred_label == gt_label:\n                    axis_tp[axis] += 1\n    \
+          \            else:\n                    axis_fn[axis] += 1\n           \
+          \         if pred_label is not None:\n                        axis_fp[axis]\
+          \ += 1\n            elif pred_label is not None:\n                axis_fp[axis]\
+          \ += 1\n\n    per_axis: dict[str, dict[str, float]] = {}\n    f1_scores:\
+          \ list[float] = []\n    precisions: list[float] = []\n    recalls: list[float]\
+          \ = []\n    weights: list[int] = []\n\n    for axis in sorted(all_axes):\n\
+          \        tp, fp, fn = axis_tp[axis], axis_fp[axis], axis_fn[axis]\n    \
+          \    p = tp / (tp + fp) if (tp + fp) > 0 else 0.0\n        r = tp / (tp\
+          \ + fn) if (tp + fn) > 0 else 0.0\n        f1 = (2 * p * r) / (p + r) if\
+          \ (p + r) > 0 else 0.0\n        support = axis_support[axis]\n        per_axis[axis]\
+          \ = {\"precision\": p, \"recall\": r, \"f1\": f1, \"support\": support}\n\
+          \        f1_scores.append(f1)\n        precisions.append(p)\n        recalls.append(r)\n\
+          \        weights.append(support)\n\n    total_weight = sum(weights)\n  \
+          \  if total_weight > 0:\n        overall_f1 = sum(f * w for f, w in zip(f1_scores,\
+          \ weights, strict=False)) / total_weight\n        overall_p = sum(p * w\
+          \ for p, w in zip(precisions, weights, strict=False)) / total_weight\n \
+          \       overall_r = sum(r * w for r, w in zip(recalls, weights, strict=False))\
+          \ / total_weight\n    else:\n        overall_f1 = overall_p = overall_r\
+          \ = 0.0\n\n    # \u2500\u2500 Eval gate \u2500\u2500\u2500\u2500\u2500\u2500\
           \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
           \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
           \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
-          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    gate_passed\
-          \ = overall_f1 >= min_overall_f1\n\n    metrics = {\n        \"overall_f1\"\
-          : overall_f1,\n        \"overall_precision\": overall_p,\n        \"overall_recall\"\
-          : overall_r,\n        \"per_axis\": per_axis,\n        \"total_samples\"\
-          : len(predictions),\n        \"eval_gate_passed\": gate_passed,\n    }\n\
-          \n    passed = \"true\" if gate_passed else \"false\"\n    return (passed,\
-          \ json.dumps(metrics))\n\n"
-        image: python:3.11-slim
+          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \u2500\u2500\n    gate_passed = overall_f1 >= min_overall_f1\n\n    metrics\
+          \ = {\n        \"overall_f1\": overall_f1,\n        \"overall_precision\"\
+          : overall_p,\n        \"overall_recall\": overall_r,\n        \"per_axis\"\
+          : per_axis,\n        \"total_samples\": len(predictions),\n        \"eval_gate_passed\"\
+          : gate_passed,\n    }\n\n    passed = \"true\" if gate_passed else \"false\"\
+          \n    return (passed, json.dumps(metrics))\n\n"
+        image: us-central1-docker.pkg.dev/i4g-ml/containers/pipeline-base:dev
     exec-prepare-dataset:
       container:
         args:
@@ -331,9 +330,8 @@ deploymentSpec:
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
           \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
-          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
-          \  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage'\
-          \ && \"$0\" \"$@\"\n"
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
         - sh
         - -ec
         - 'program_path=$(mktemp -d)
@@ -356,7 +354,7 @@ deploymentSpec:
           )\n        if not blob.exists():\n            raise FileNotFoundError(f\"\
           Missing dataset split: gs://{bucket_name}/{prefix}/{split}.jsonl\")\n\n\
           \    return f\"gs://{bucket_name}/{prefix}\"\n\n"
-        image: python:3.11-slim
+        image: us-central1-docker.pkg.dev/i4g-ml/containers/pipeline-base:dev
     exec-register-model:
       container:
         args:
@@ -370,9 +368,8 @@ deploymentSpec:
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
           \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
-          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
-          \  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform'\
-          \ && \"$0\" \"$@\"\n"
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
         - sh
         - -ec
         - 'program_path=$(mktemp -d)
@@ -394,7 +391,7 @@ deploymentSpec:
           \        artifact_uri=model_uri,\n        serving_container_image_uri=serving_container_uri,\n\
           \        labels={\"stage\": \"candidate\", \"capability\": \"classification\"\
           },\n    )\n    return model.resource_name\n\n"
-        image: python:3.11-slim
+        image: us-central1-docker.pkg.dev/i4g-ml/containers/pipeline-base:dev
     exec-train-model:
       container:
         args:
@@ -408,9 +405,8 @@ deploymentSpec:
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
           \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0'\
-          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
-          \  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform'\
-          \ && \"$0\" \"$@\"\n"
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
         - sh
         - -ec
         - 'program_path=$(mktemp -d)
@@ -426,17 +422,23 @@ deploymentSpec:
           \ str,\n    config_path: str,\n    dataset_gcs_path: str,\n    experiment_name:\
           \ str,\n) -> str:\n    \"\"\"Submit a Vertex AI CustomJob for model training.\n\
           \n    Returns the GCS URI of the model artifacts.\n    \"\"\"\n    from\
-          \ google.cloud import aiplatform\n\n    aiplatform.init(project=project_id,\
-          \ location=region)\n\n    job = aiplatform.CustomJob.from_local_script(\n\
-          \        display_name=f\"train-{experiment_name}\",\n        script_path=\"\
-          train.py\",\n        container_uri=container_uri,\n        args=[\n    \
-          \        \"--config\",\n            config_path,\n            \"--dataset\"\
-          ,\n            dataset_gcs_path,\n            \"--experiment\",\n      \
-          \      experiment_name,\n        ],\n        machine_type=\"n1-standard-4\"\
-          ,\n        accelerator_type=\"NVIDIA_TESLA_T4\",\n        accelerator_count=1,\n\
-          \    )\n    job.run(experiment=experiment_name)\n\n    return f\"gs://i4g-ml-data/models/{experiment_name}/\"\
-          \n\n"
-        image: python:3.11-slim
+          \ google.cloud import aiplatform\n\n    aiplatform.init(\n        project=project_id,\n\
+          \        location=region,\n        staging_bucket=\"gs://i4g-ml-vertex-pipelines-us-central1\"\
+          ,\n        experiment=experiment_name,\n    )\n\n    model_output = f\"\
+          gs://i4g-ml-data/models/{experiment_name}/\"\n    job = aiplatform.CustomJob(\n\
+          \        display_name=f\"train-{experiment_name}\",\n        worker_pool_specs=[\n\
+          \            {\n                \"machine_spec\": {\n                  \
+          \  \"machine_type\": \"n1-highmem-4\",\n                },\n           \
+          \     \"replica_count\": 1,\n                \"container_spec\": {\n   \
+          \                 \"image_uri\": container_uri,\n                    \"\
+          args\": [\n                        \"--config\",\n                     \
+          \   config_path,\n                        \"--dataset\",\n             \
+          \           dataset_gcs_path,\n                        \"--experiment\"\
+          ,\n                        experiment_name,\n                        \"\
+          --output\",\n                        model_output,\n                   \
+          \ ],\n                },\n            }\n        ],\n    )\n    job.run(experiment=experiment_name)\n\
+          \n    return f\"gs://i4g-ml-data/models/{experiment_name}/\"\n\n"
+        image: us-central1-docker.pkg.dev/i4g-ml/containers/pipeline-base:dev
 pipelineInfo:
   description: "End-to-end training pipeline: data prep \u2192 train \u2192 evaluate\
     \ \u2192 register \u2192 deploy"

@@ -11,11 +11,15 @@ from typing import NamedTuple
 
 from kfp import dsl
 
+# All pipeline component dependencies (kfp, google-cloud-aiplatform,
+# google-cloud-storage) are pre-installed in this image at compatible pinned
+# versions.  Using a shared base image eliminates runtime pip installs and
+# the protobuf version conflicts they cause.  Rebuild with:
+#   scripts/build_image.sh pipeline-base dev
+_PIPELINE_BASE_IMAGE = "us-central1-docker.pkg.dev/i4g-ml/containers/pipeline-base:dev"
 
-@dsl.component(
-    base_image="python:3.11-slim",
-    packages_to_install=["google-cloud-storage"],
-)
+
+@dsl.component(base_image=_PIPELINE_BASE_IMAGE)
 def prepare_dataset(
     project_id: str,
     dataset_id: str,
@@ -41,10 +45,7 @@ def prepare_dataset(
     return f"gs://{bucket_name}/{prefix}"
 
 
-@dsl.component(
-    base_image="python:3.11-slim",
-    packages_to_install=["google-cloud-aiplatform"],
-)
+@dsl.component(base_image=_PIPELINE_BASE_IMAGE)
 def train_model(
     project_id: str,
     region: str,
@@ -59,33 +60,44 @@ def train_model(
     """
     from google.cloud import aiplatform
 
-    aiplatform.init(project=project_id, location=region)
+    aiplatform.init(
+        project=project_id,
+        location=region,
+        staging_bucket="gs://i4g-ml-vertex-pipelines-us-central1",
+        experiment=experiment_name,
+    )
 
-    job = aiplatform.CustomJob.from_local_script(
+    model_output = f"gs://i4g-ml-data/models/{experiment_name}/"
+    job = aiplatform.CustomJob(
         display_name=f"train-{experiment_name}",
-        script_path="train.py",
-        container_uri=container_uri,
-        args=[
-            "--config",
-            config_path,
-            "--dataset",
-            dataset_gcs_path,
-            "--experiment",
-            experiment_name,
+        worker_pool_specs=[
+            {
+                "machine_spec": {
+                    "machine_type": "n1-highmem-4",
+                },
+                "replica_count": 1,
+                "container_spec": {
+                    "image_uri": container_uri,
+                    "args": [
+                        "--config",
+                        config_path,
+                        "--dataset",
+                        dataset_gcs_path,
+                        "--experiment",
+                        experiment_name,
+                        "--output",
+                        model_output,
+                    ],
+                },
+            }
         ],
-        machine_type="n1-standard-4",
-        accelerator_type="NVIDIA_TESLA_T4",
-        accelerator_count=1,
     )
     job.run(experiment=experiment_name)
 
     return f"gs://i4g-ml-data/models/{experiment_name}/"
 
 
-@dsl.component(
-    base_image="python:3.11-slim",
-    packages_to_install=["google-cloud-storage"],
-)
+@dsl.component(base_image=_PIPELINE_BASE_IMAGE)
 def evaluate_model(
     model_uri: str,
     golden_set_uri: str,
@@ -333,10 +345,7 @@ def evaluate_model(
     return (passed, json.dumps(metrics))
 
 
-@dsl.component(
-    base_image="python:3.11-slim",
-    packages_to_install=["google-cloud-aiplatform"],
-)
+@dsl.component(base_image=_PIPELINE_BASE_IMAGE)
 def register_model(
     project_id: str,
     region: str,
@@ -364,10 +373,7 @@ def register_model(
     return model.resource_name
 
 
-@dsl.component(
-    base_image="python:3.11-slim",
-    packages_to_install=["google-cloud-aiplatform"],
-)
+@dsl.component(base_image=_PIPELINE_BASE_IMAGE)
 def deploy_model(
     project_id: str,
     region: str,

@@ -24,7 +24,7 @@ def main() -> None:
     aiplatform.init(project=PROJECT, location=REGION)
 
     job = aiplatform.PipelineJob(
-        display_name="classification-gemma2b-v1",
+        display_name="classification-opt125m-v1",
         template_path="pipeline.yaml",
         parameter_values={
             "project_id": PROJECT,
@@ -34,8 +34,8 @@ def main() -> None:
             "dataset_version": 1,
             "container_uri": f"{REGISTRY}/train-pytorch:dev",
             "serving_container_uri": f"{REGISTRY}/serve:dev",
-            "experiment_name": "classification-gemma2b-v1",
-            "config_path": "gs://i4g-ml-data/configs/classification_gemma2b.yaml",
+            "experiment_name": "classification-opt125m-v1",
+            "config_path": "gs://i4g-ml-data/configs/classification_opt125m.yaml",
             "golden_set_uri": "gs://i4g-ml-data/datasets/classification/golden/test.jsonl",
             "endpoint_name": "serving-dev",
             "min_overall_f1": 0.0,

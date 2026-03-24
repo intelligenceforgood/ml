@@ -93,12 +93,13 @@ def train(config: dict, train_data: list[dict], eval_data: list[dict]) -> Path:
     label2id = {lbl: i for i, lbl in enumerate(sorted(set(all_labels)))}
     id2label = {i: lbl for lbl, i in label2id.items()}
 
+    use_gpu = torch.cuda.is_available()
     model = AutoModelForSequenceClassification.from_pretrained(
         base_model,
         num_labels=len(label2id),
         label2id=label2id,
         id2label=id2label,
-        torch_dtype=torch.float16,
+        dtype=torch.float16 if use_gpu else torch.float32,
     )
 
     # Apply LoRA
@@ -138,10 +139,10 @@ def train(config: dict, train_data: list[dict], eval_data: list[dict]) -> Path:
         per_device_train_batch_size=hyperparams.get("batch_size", 8),
         learning_rate=hyperparams.get("learning_rate", 2e-4),
         warmup_ratio=hyperparams.get("warmup_ratio", 0.1),
-        evaluation_strategy="epoch",
+        eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
-        fp16=True,
+        fp16=use_gpu,
         logging_steps=10,
         report_to="none",
     )

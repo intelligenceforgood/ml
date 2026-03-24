@@ -69,6 +69,9 @@ build-train-xgboost-prod:
 build-serve-prod:
 	scripts/build_image.sh serve prod
 
+deploy-serve-prod: build-serve-prod
+	@echo "Prod serving image built. Deploy via: cd ../infra/environments/ml && terraform apply"
+
 # ---------- Clean ----------
 clean:
 	rm -rf build/ dist/ *.egg-info src/*.egg-info .pytest_cache .mypy_cache
