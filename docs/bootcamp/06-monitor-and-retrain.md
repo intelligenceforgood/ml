@@ -32,6 +32,7 @@ head -60 src/ml/monitoring/drift.py
 ```
 
 **What to notice:**
+
 - **PSI (Population Stability Index):** measures how much a distribution has shifted from baseline
 - Threshold: PSI > 0.2 = drifted (standard practice for categorical distributions)
 - Two types of drift: prediction drift (label distributions) and feature drift (input feature distributions)
@@ -60,6 +61,7 @@ head -60 src/ml/monitoring/triggers.py
 ```
 
 **What to notice:**
+
 - `MIN_ANALYST_LABELS = 200`: retrain when 200+ new analyst labels are available
 - `DRIFT_PSI_THRESHOLD = 0.2`: retrain when any axis drifts above this threshold
 - `MAX_DAYS_SINCE_TRAINING = 30`: retrain if the model is older than 30 days
@@ -75,6 +77,7 @@ head -80 scripts/trigger_retraining.py
 ```
 
 **What to notice:**
+
 - Always exits with code 0 (Cloud Run Jobs treat exit code 1 as failure)
 - Uses structured JSON logging for alerting (not exit codes)
 - Calls `evaluate_retraining_conditions()` → if `should_retrain`, calls `submit_pipeline()`
@@ -89,6 +92,7 @@ conda run -n ml python scripts/trigger_retraining.py --capability classification
 ```
 
 **Expected output:** Structured JSON log with either:
+
 - `"action": "retrain_submitted"` — conditions met, pipeline submitted
 - `"action": "retrain_skipped"` — conditions not met, reasons listed
 
@@ -148,13 +152,13 @@ bq query --use_legacy_sql=false \
 
 In production, these jobs run automatically:
 
-| Job | Schedule | What it does |
-|-----|----------|--------------|
-| Drift computation | Daily 6 AM UTC | Computes drift metrics, writes to `analytics_drift_metrics` |
-| Accuracy metrics | Daily 5 AM UTC | Computes accuracy from prediction+outcome logs |
-| Cost summary | Daily 5:30 AM UTC | Computes per-prediction cost comparison |
-| Retraining trigger | Daily 6 AM UTC | Evaluates conditions, submits pipeline if warranted |
-| Forced retrain | Monthly 1st, 7 AM UTC | `--force` flag ensures at least monthly retraining |
+| Job                | Schedule              | What it does                                                |
+| ------------------ | --------------------- | ----------------------------------------------------------- |
+| Drift computation  | Daily 6 AM UTC        | Computes drift metrics, writes to `analytics_drift_metrics` |
+| Accuracy metrics   | Daily 5 AM UTC        | Computes accuracy from prediction+outcome logs              |
+| Cost summary       | Daily 5:30 AM UTC     | Computes per-prediction cost comparison                     |
+| Retraining trigger | Daily 6 AM UTC        | Evaluates conditions, submits pipeline if warranted         |
+| Forced retrain     | Monthly 1st, 7 AM UTC | `--force` flag ensures at least monthly retraining          |
 
 These are defined in Terraform: `infra/stacks/ml/main.tf`.
 
@@ -162,12 +166,12 @@ These are defined in Terraform: `infra/stacks/ml/main.tf`.
 
 ## Summary
 
-| Component | What it does | BigQuery table |
-|-----------|-------------|---------------|
-| `drift.py` | Detects input/output distribution shifts | `analytics_drift_metrics` |
-| `triggers.py` | Evaluates retraining conditions | `analytics_trigger_log` |
-| `accuracy.py` | Tracks model accuracy over time | `analytics_model_performance` |
-| `cost.py` | Compares ML vs. LLM costs | `analytics_cost_summary` |
-| `trigger_retraining.py` | Cloud Run Job entry point | Submits pipeline when conditions met |
+| Component               | What it does                             | BigQuery table                       |
+| ----------------------- | ---------------------------------------- | ------------------------------------ |
+| `drift.py`              | Detects input/output distribution shifts | `analytics_drift_metrics`            |
+| `triggers.py`           | Evaluates retraining conditions          | `analytics_trigger_log`              |
+| `accuracy.py`           | Tracks model accuracy over time          | `analytics_model_performance`        |
+| `cost.py`               | Compares ML vs. LLM costs                | `analytics_cost_summary`             |
+| `trigger_retraining.py` | Cloud Run Job entry point                | Submits pipeline when conditions met |
 
 **Next exercise:** [07 — Add a New Capability](07-add-new-capability.md), where you add a toy third ML capability end-to-end.

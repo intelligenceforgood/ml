@@ -26,6 +26,7 @@ head -80 src/ml/serving/predict.py
 ```
 
 **What to notice:**
+
 - `app.py`: FastAPI app with routes for `/predict/classify`, `/predict/extract-entities`, `/feedback`, `/health`
 - `predict.py`: model loading + inference logic
   - `_MODEL_STATE`: holds loaded classification model (weights, tokenizer/booster, label map)
@@ -42,6 +43,7 @@ head -60 scripts/deploy_serving.py
 ```
 
 **What to notice:**
+
 - Uploads the model to Vertex AI Model Registry with labels (stage, capability)
 - Finds the `serving-dev` endpoint
 - Deploys with configured machine type and replica count
@@ -69,6 +71,7 @@ gcloud run services describe ml-serving --project=i4g-ml --region=us-central1 \
 ```
 
 Key environment variables on the Cloud Run service:
+
 - `MODEL_ARTIFACT_URI`: GCS path to the classification model artifact
 - `NER_MODEL_ARTIFACT_URI`: GCS path to the NER model (empty = disabled)
 - `SHADOW_MODEL_ARTIFACT_URI`: GCS path to shadow model (empty = disabled)
@@ -94,19 +97,20 @@ curl -s -X POST "${SERVICE_URL}/predict/classify" \
 ```
 
 **Expected response:**
+
 ```json
 {
-    "prediction": {
-        "INTENT": {"label": "INTENT.INVESTMENT", "confidence": 0.87},
-        "CHANNEL": {"label": "CHANNEL.SOCIAL_MEDIA", "confidence": 0.92}
-    },
-    "risk_score": 0.85,
-    "model_info": {
-        "model_id": "classification-xgboost-v1",
-        "version": 1,
-        "stage": "champion"
-    },
-    "prediction_id": "pred-abc123..."
+  "prediction": {
+    "INTENT": { "label": "INTENT.INVESTMENT", "confidence": 0.87 },
+    "CHANNEL": { "label": "CHANNEL.SOCIAL_MEDIA", "confidence": 0.92 }
+  },
+  "risk_score": 0.85,
+  "model_info": {
+    "model_id": "classification-xgboost-v1",
+    "version": 1,
+    "stage": "champion"
+  },
+  "prediction_id": "pred-abc123..."
 }
 ```
 
@@ -119,12 +123,13 @@ curl -s "${SERVICE_URL}/health" | python -m json.tool
 ```
 
 **Expected response:**
+
 ```json
 {
-    "status": "healthy",
-    "model_id": "classification-xgboost-v1",
-    "shadow_active": false,
-    "ner_active": false
+  "status": "healthy",
+  "model_id": "classification-xgboost-v1",
+  "shadow_active": false,
+  "ner_active": false
 }
 ```
 
@@ -178,12 +183,12 @@ bq query --use_legacy_sql=false \
 
 ## Summary
 
-| Step | What you did | Verified |
-|------|-------------|----------|
-| Built container | Packaged serving code | Image in Artifact Registry |
-| Deployed | Model live on Cloud Run | Health endpoint returns 200 |
-| Sent prediction | Got classification result | Correct JSON response |
-| Checked logging | Prediction in BigQuery | `prediction_log` row exists |
-| Sent feedback | Simulated analyst correction | `outcome_log` row exists |
+| Step            | What you did                 | Verified                    |
+| --------------- | ---------------------------- | --------------------------- |
+| Built container | Packaged serving code        | Image in Artifact Registry  |
+| Deployed        | Model live on Cloud Run      | Health endpoint returns 200 |
+| Sent prediction | Got classification result    | Correct JSON response       |
+| Checked logging | Prediction in BigQuery       | `prediction_log` row exists |
+| Sent feedback   | Simulated analyst correction | `outcome_log` row exists    |
 
 **Next exercise:** [06 — Monitor and Retrain](06-monitor-and-retrain.md), where you trigger drift computation, read monitoring data, and invoke retraining.

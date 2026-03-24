@@ -29,6 +29,7 @@ head -90 src/ml/training/evaluation.py
 ```
 
 **What to notice:**
+
 - `AxisMetrics`: precision, recall, F1 for a single taxonomy axis (e.g., INTENT, CHANNEL)
 - `EvalResult`: overall metrics + per-axis breakdown
 - `compute_metrics()`: takes predictions and ground truth (both as `[{axis: label_code}]` dicts), computes TP/FP/FN per axis
@@ -46,11 +47,13 @@ head -80 src/ml/registry/promotion.py
 ```
 
 **Model lifecycle stages:**
+
 1. **`experimental`** — freshly trained, unvalidated
 2. **`candidate`** — eval gate passed, ready for manual review
 3. **`champion`** — approved for production serving
 
 **Eval gate rules (`_passes_eval_gate`):**
+
 - First model always passes (no champion to compare against)
 - Candidate's overall F1 must be ≥ champion's overall F1
 - No per-axis regression > 5% (configurable via `max_regression`)
@@ -145,11 +148,11 @@ gcloud ai models list --project=i4g-ml --region=us-central1 \
 
 ## Summary
 
-| Concept | Key insight |
-|---------|-------------|
-| Macro F1 | Primary metric — average F1 across axes, equal weight |
-| Eval gate | Overall F1 must improve, no axis drops > 5% |
-| Promotion path | experimental → candidate → champion |
-| NER eval gate | Uses entity micro F1 (not macro F1) + per-entity-type regression check |
+| Concept        | Key insight                                                            |
+| -------------- | ---------------------------------------------------------------------- |
+| Macro F1       | Primary metric — average F1 across axes, equal weight                  |
+| Eval gate      | Overall F1 must improve, no axis drops > 5%                            |
+| Promotion path | experimental → candidate → champion                                    |
+| NER eval gate  | Uses entity micro F1 (not macro F1) + per-entity-type regression check |
 
 **Next exercise:** [05 — Deploy to Serving](05-deploy-to-serving.md), where you deploy a promoted model to the serving endpoint.

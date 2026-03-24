@@ -61,6 +61,7 @@ grep -A 15 "class.*DoFn" src/ml/data/graph_features.py
 ```
 
 **What to notice:**
+
 - `EmitCoOccurrencePairs`: generates all `(case_i, case_j)` combinations for entities shared across cases
 - `ComputePerCaseFeatures`: aggregates co-occurrence data per case
 - Connected components use NetworkX `connected_components()` — viable at our scale (~10K cases, sparse graph)
@@ -74,6 +75,7 @@ cat pipelines/sql/features_graph_features.sql
 ```
 
 The output table has:
+
 - `case_id`: the case identifier
 - `shared_entity_count`: how many entities this case shares with other cases
 - `entity_reuse_frequency`: average reuse count of this case's entities
@@ -148,12 +150,12 @@ grep -A 7 "submit-graph-features-dev" Makefile
 
 ## Summary
 
-| Feature | Value | Interpretation |
-|---------|-------|---------------|
-| `shared_entity_count = 0` | No shared entities | Case is isolated |
-| `shared_entity_count = 5` | 5 shared entities | Moderate connections |
+| Feature                        | Value                           | Interpretation                   |
+| ------------------------------ | ------------------------------- | -------------------------------- |
+| `shared_entity_count = 0`      | No shared entities              | Case is isolated                 |
+| `shared_entity_count = 5`      | 5 shared entities               | Moderate connections             |
 | `entity_reuse_frequency = 3.2` | Each entity appears in ~3 cases | Entities are reused across cases |
-| `cluster_size = 1` | Standalone case | Not connected to other cases |
-| `cluster_size = 50` | Part of a 50-case cluster | Potentially a fraud ring |
+| `cluster_size = 1`             | Standalone case                 | Not connected to other cases     |
+| `cluster_size = 50`            | Part of a 50-case cluster       | Potentially a fraud ring         |
 
 **Next exercise:** [09 — Looker Studio Dashboard](09-looker-dashboard.md), where you build a monitoring dashboard from BigQuery analytics tables.

@@ -29,6 +29,7 @@ cat containers/train-xgboost/train.py
 ```
 
 **What to notice:**
+
 - Reads training config from environment variables or a config YAML
 - Downloads JSONL dataset from GCS
 - Extracts tabular features and label columns
@@ -101,6 +102,7 @@ docker run --rm \
 ```
 
 **Expected output:**
+
 - Training logs showing XGBoost iterations
 - Final metrics (accuracy, F1) printed to stdout
 - Model artifacts written to `data/local-training/output/`
@@ -120,6 +122,7 @@ cat data/local-training/output/training_config.json | python -m json.tool
 ```
 
 **What to notice:**
+
 - `xgboost_model.json`: the serialized XGBoost booster (the actual model weights)
 - `label_map.json`: maps integer predictions back to taxonomy labels, grouped by axis
 - `training_config.json`: records hyperparameters, dataset version, and training metadata for reproducibility
@@ -135,6 +138,7 @@ cat pipelines/configs/classification_xgboost.yaml
 ```
 
 **What to notice:**
+
 - `capability`: which ML task this config is for
 - `framework`: which training container to use
 - `model_id`: identifier for the trained model
@@ -153,12 +157,12 @@ rm -rf data/local-training
 
 ## Summary
 
-| Step | What you did | Key file |
-|------|-------------|----------|
-| Examined training code | Understood how the container trains | `containers/train-xgboost/train.py` |
-| Created synthetic data | Produced a minimal JSONL dataset | — |
-| Built container | Packaged training code into Docker | `docker/train-xgboost.Dockerfile` |
-| Ran training | Produced model artifacts locally | `containers/train-xgboost/train.py` |
-| Inspected artifacts | Understood output format | `label_map.json`, `xgboost_model.json` |
+| Step                   | What you did                        | Key file                               |
+| ---------------------- | ----------------------------------- | -------------------------------------- |
+| Examined training code | Understood how the container trains | `containers/train-xgboost/train.py`    |
+| Created synthetic data | Produced a minimal JSONL dataset    | —                                      |
+| Built container        | Packaged training code into Docker  | `docker/train-xgboost.Dockerfile`      |
+| Ran training           | Produced model artifacts locally    | `containers/train-xgboost/train.py`    |
+| Inspected artifacts    | Understood output format            | `label_map.json`, `xgboost_model.json` |
 
 **Next exercise:** [03 — Submit a Pipeline](03-submit-pipeline.md), where you send this training job to Vertex AI Pipelines on GCP.

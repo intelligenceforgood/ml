@@ -33,6 +33,7 @@ grep -A 8 "TABLE_CONFIGS" src/ml/data/etl.py | head -30
 ```
 
 **What to notice:**
+
 - `source_table`: the Cloud SQL table name (e.g., `cases`, `entities`, `analyst_labels`)
 - `target_table`: the BigQuery destination (e.g., `raw_cases`, `raw_entities`, `raw_analyst_labels`)
 - `primary_key`: used for MERGE-based idempotent upserts
@@ -100,6 +101,7 @@ head -80 src/ml/data/datasets.py
 ```
 
 Key behaviors:
+
 - Queries BigQuery to join raw cases with features and analyst labels
 - Applies PII redaction (via `redact_record()`) before export
 - Stratified splitting: train (70%) / eval (15%) / test (15%)
@@ -135,6 +137,7 @@ gsutil cat gs://i4g-ml-data/datasets/classification_v1_train.jsonl | head -3 | p
 ```
 
 **What to notice:**
+
 - `label_source` field: `analyst` (human-labeled) or `llm_bootstrap` (LLM-generated labels for early training)
 - Text fields are PII-redacted
 - Feature columns from the features table are included
@@ -144,10 +147,10 @@ gsutil cat gs://i4g-ml-data/datasets/classification_v1_train.jsonl | head -3 | p
 
 ## Summary
 
-| Stage | Code | Output |
-|-------|------|--------|
-| ETL sync | `data/etl.py` | BigQuery `raw_*` tables |
-| Feature materialization | `pipelines/sql/v_case_features.sql` | BigQuery `features_case_features` |
-| Dataset export | `data/datasets.py` | GCS JSONL files + `training_dataset_registry` row |
+| Stage                   | Code                                | Output                                            |
+| ----------------------- | ----------------------------------- | ------------------------------------------------- |
+| ETL sync                | `data/etl.py`                       | BigQuery `raw_*` tables                           |
+| Feature materialization | `pipelines/sql/v_case_features.sql` | BigQuery `features_case_features`                 |
+| Dataset export          | `data/datasets.py`                  | GCS JSONL files + `training_dataset_registry` row |
 
 **Next exercise:** [02 — Train a Model Locally](02-train-locally.md), where you use one of these datasets to train an XGBoost model.

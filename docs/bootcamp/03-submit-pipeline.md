@@ -25,6 +25,7 @@ head -80 src/ml/training/pipeline.py
 ```
 
 **What to notice:**
+
 - The pipeline is defined as a Python function decorated with `@kfp.dsl.pipeline`
 - Each step is a KFP component (containerized function)
 - Steps are connected via inputs/outputs — KFP handles data passing between containers
@@ -58,6 +59,7 @@ head -80 scripts/submit_pipeline.py
 ```
 
 **What to notice:**
+
 - `_auto_compile_if_stale()`: automatically recompiles if the source `.py` is newer than the compiled `.yaml`
 - `submit_pipeline()`: initializes Vertex AI, loads config, creates a `PipelineJob`, and submits it
 - Tags each run with: capability, trigger reason, dataset version, timestamp — for tracking
@@ -83,6 +85,7 @@ conda run -n ml python scripts/submit_pipeline.py \
 ```
 
 **Expected output:**
+
 - "Compiled to pipelines/training_pipeline.yaml" (if recompiled)
 - "Submitting pipeline job..." with a Vertex AI pipeline job resource name
 - A URL to the Vertex AI Pipelines console
@@ -94,6 +97,7 @@ Copy the pipeline job URL and open it in your browser.
 ## Step 6: Monitor the pipeline
 
 In the Vertex AI console, you can see:
+
 - Each step's status (pending → running → succeeded/failed)
 - Logs from each container
 - Input/output artifacts for each step
@@ -131,12 +135,12 @@ bq query --use_legacy_sql=false \
 
 ## Summary
 
-| Step | What you did | Key file |
-|------|-------------|----------|
-| Read pipeline definition | Understood the KFP DAG | `training/pipeline.py` |
-| Compiled pipeline | Generated YAML from Python | `pipelines/training_pipeline.yaml` |
-| Submitted pipeline | Sent job to Vertex AI | `scripts/submit_pipeline.py` |
-| Monitored execution | Tracked steps in console | Vertex AI Pipelines UI |
-| Verified outputs | Confirmed model registration | Model Registry + BigQuery |
+| Step                     | What you did                 | Key file                           |
+| ------------------------ | ---------------------------- | ---------------------------------- |
+| Read pipeline definition | Understood the KFP DAG       | `training/pipeline.py`             |
+| Compiled pipeline        | Generated YAML from Python   | `pipelines/training_pipeline.yaml` |
+| Submitted pipeline       | Sent job to Vertex AI        | `scripts/submit_pipeline.py`       |
+| Monitored execution      | Tracked steps in console     | Vertex AI Pipelines UI             |
+| Verified outputs         | Confirmed model registration | Model Registry + BigQuery          |
 
 **Next exercise:** [04 — Evaluate and Promote](04-evaluate-and-promote.md), where you interpret evaluation metrics and promote the trained model.
