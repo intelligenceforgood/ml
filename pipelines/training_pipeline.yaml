@@ -75,6 +75,8 @@ components:
     executorLabel: exec-register-model
     inputDefinitions:
       parameters:
+        capability:
+          parameterType: STRING
         display_name:
           parameterType: STRING
         eval_passed:
@@ -383,14 +385,15 @@ deploymentSpec:
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
           \ *\n\ndef register_model(\n    project_id: str,\n    region: str,\n   \
           \ model_uri: str,\n    display_name: str,\n    serving_container_uri: str,\n\
-          \    eval_passed: str,\n) -> str:\n    \"\"\"Register a trained model in\
-          \ Vertex AI Model Registry.\n\n    Returns the model resource name or 'SKIPPED'.\n\
-          \    \"\"\"\n    if eval_passed != \"true\":\n        return \"SKIPPED\"\
-          \n\n    from google.cloud import aiplatform\n\n    aiplatform.init(project=project_id,\
-          \ location=region)\n    model = aiplatform.Model.upload(\n        display_name=display_name,\n\
-          \        artifact_uri=model_uri,\n        serving_container_image_uri=serving_container_uri,\n\
-          \        labels={\"stage\": \"candidate\", \"capability\": \"classification\"\
-          },\n    )\n    return model.resource_name\n\n"
+          \    eval_passed: str,\n    capability: str,\n) -> str:\n    \"\"\"Register\
+          \ a trained model in Vertex AI Model Registry.\n\n    Returns the model\
+          \ resource name or 'SKIPPED'.\n    \"\"\"\n    if eval_passed != \"true\"\
+          :\n        return \"SKIPPED\"\n\n    from google.cloud import aiplatform\n\
+          \n    aiplatform.init(project=project_id, location=region)\n    model =\
+          \ aiplatform.Model.upload(\n        display_name=display_name,\n       \
+          \ artifact_uri=model_uri,\n        serving_container_image_uri=serving_container_uri,\n\
+          \        labels={\"stage\": \"candidate\", \"capability\": capability},\n\
+          \    )\n    return model.resource_name\n\n"
         image: us-central1-docker.pkg.dev/i4g-ml/containers/pipeline-base:dev
     exec-train-model:
       container:
@@ -521,6 +524,8 @@ root:
         - train-model
         inputs:
           parameters:
+            capability:
+              componentInputParameter: capability
             display_name:
               componentInputParameter: experiment_name
             eval_passed:

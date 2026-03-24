@@ -85,6 +85,8 @@ def log_prediction(
     features: dict | None = None,
     latency_ms: int = 0,
     endpoint: str = "",
+    is_shadow: bool = False,
+    capability: str = "classification",
 ) -> None:
     """Log a prediction to BigQuery ``predictions_prediction_log``."""
     try:
@@ -101,6 +103,8 @@ def log_prediction(
             "request_payload": json.dumps({"case_id": case_id}),
             "prediction": json.dumps(prediction),
             "latency_ms": latency_ms,
+            "is_shadow": is_shadow,
+            "capability": capability,
             "timestamp": datetime.now(UTC).isoformat(),
         }
         _insert_with_retry(table, row, context=f"prediction:{prediction_id}")

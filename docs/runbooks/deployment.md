@@ -4,7 +4,7 @@
 
 - `gcloud` CLI authenticated with access to `i4g-ml` project
 - Docker installed and authenticated to Artifact Registry
-- Conda environment `i4g` activated
+- Conda environment `ml` activated
 - Terraform state initialized for `infra/environments/ml/` and `infra/environments/app/dev/`
 
 ## 1. Apply Cross-Project IAM (one-time)
@@ -77,7 +77,7 @@ SELECT COUNT(*) FROM `i4g-ml.i4g_ml.features_case_features`;
 Bootstrap the first training dataset from existing LLM classifications:
 
 ```bash
-conda run -n i4g python -c "
+conda run -n ml python -c "
 from ml.data.datasets import create_dataset_version
 create_dataset_version(
     project='i4g-ml',
@@ -93,7 +93,7 @@ create_dataset_version(
 Before training, establish the few-shot LLM baseline:
 
 ```bash
-conda run -n i4g python -c "
+conda run -n ml python -c "
 from ml.training.baseline import run_baseline, save_baseline_result
 result = run_baseline(golden_set_path='gs://i4g-ml-data/datasets/classification/golden/test.jsonl')
 save_baseline_result(result, project='i4g-ml', dataset='i4g_ml')
@@ -106,17 +106,17 @@ print(f'Baseline F1: {result.overall_f1:.4f}')
 Submit the KFP v2 pipeline to Vertex AI:
 
 ```bash
-conda run -n i4g python -c "
+conda run -n ml python -c "
 from ml.training.pipeline import training_pipeline
 from kfp import compiler
 from google.cloud import aiplatform
 
-compiler.Compiler().compile(training_pipeline, 'pipeline.yaml')
+compiler.Compiler().compile(training_pipeline, 'pipelines/training_pipeline.yaml')
 
 aiplatform.init(project='i4g-ml', location='us-central1')
 job = aiplatform.PipelineJob(
     display_name='classification-gemma2b-v1',
-    template_path='pipeline.yaml',
+    template_path='pipelines/training_pipeline.yaml',
     parameter_values={
         'project': 'i4g-ml',
         'config_uri': 'gs://i4g-ml-data/configs/classification_gemma2b.yaml',
@@ -154,7 +154,7 @@ bq query --project_id=i4g-ml --use_legacy_sql=false \
 From the Core project, verify the `MLPlatformClient` can call the ML endpoint:
 
 ```bash
-conda run -n i4g I4G_ENV=local I4G_ML__INFERENCE_BACKEND=ml_platform \
+conda run -n ml I4G_ENV=local I4G_ML__INFERENCE_BACKEND=ml_platform \
   python -c "
 from i4g.ml.client import MLPlatformClient
 client = MLPlatformClient(base_url='https://serving-dev-<hash>.us-central1.aiplatform.googleapis.com')

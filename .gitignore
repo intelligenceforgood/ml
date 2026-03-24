@@ -6,6 +6,7 @@ __pycache__/
 .coverage
 htmlcov/
 .pytest_cache/
+.ruff_cache/
 
 # Virtual Environments
 .env
@@ -30,6 +31,9 @@ dist/
 
 # Data / model artifacts
 data/
+
+# Compiled pipeline artifact (generated — canonical location: pipelines/training_pipeline.yaml)
+pipeline.yaml
 
 # Developer-specific configuration overrides
 config/settings.local.toml

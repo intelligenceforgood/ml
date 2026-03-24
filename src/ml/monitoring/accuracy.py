@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from ml.config import get_settings
@@ -267,7 +267,7 @@ def materialize_performance(
 
     # Compute the ISO week start (Monday) for the current period
     now = datetime.now(UTC)
-    week_start = (now - __import__("datetime").timedelta(days=now.weekday())).strftime("%Y-%m-%d")
+    week_start = (now - timedelta(days=now.weekday())).strftime("%Y-%m-%d")
 
     rows_to_insert = []
     for m in report.models:
@@ -309,6 +309,109 @@ def materialize_performance(
 
     logger.info("Materialized %d model performance rows for week %s", len(rows_to_insert), week_start)
     return len(rows_to_insert)
+
+
+# ---------------------------------------------------------------------------
+# Shadow comparison
+# ---------------------------------------------------------------------------
+
+_SHADOW_QUERY = """
+SELECT
+    c.prediction_id AS champion_id,
+    s.prediction_id AS shadow_id,
+    c.model_id AS champion_model,
+    s.model_id AS shadow_model,
+    c.prediction AS champion_prediction,
+    s.prediction AS shadow_prediction,
+    c.case_id,
+    c.timestamp
+FROM `{project}.{dataset}.{pred_table}` c
+INNER JOIN `{project}.{dataset}.{pred_table}` s
+    ON s.prediction_id = CONCAT(c.prediction_id, '-shadow')
+WHERE c.is_shadow IS NOT TRUE
+  AND s.is_shadow = TRUE
+  AND c.timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @lookback_days DAY)
+"""
+
+
+@dataclass(frozen=True)
+class ShadowComparison:
+    """Comparison between champion and shadow model predictions."""
+
+    champion_model: str
+    shadow_model: str
+    total_pairs: int
+    agreement_count: int
+    agreement_rate: float
+    per_axis_agreement: dict[str, float]
+    lookback_days: int
+    computed_at: str
+
+
+def compute_shadow_comparison(
+    *,
+    lookback_days: int = 7,
+    client: bigquery.Client | None = None,
+) -> ShadowComparison | None:
+    """Compare champion and shadow predictions from the prediction log.
+
+    Returns None if no shadow prediction pairs are found.
+    """
+    from google.cloud import bigquery as bq
+
+    bq_client = client or _get_bq_client()
+    settings = get_settings()
+
+    query = _SHADOW_QUERY.format(
+        project=settings.platform.project_id,
+        dataset=settings.bigquery.dataset_id,
+        pred_table=settings.bigquery.prediction_log_table,
+    )
+
+    job_config = bq.QueryJobConfig(
+        query_parameters=[bq.ScalarQueryParameter("lookback_days", "INT64", lookback_days)],
+    )
+
+    rows = list(bq_client.query(query, job_config=job_config).result())
+    if not rows:
+        return None
+
+    champion_model = rows[0].champion_model
+    shadow_model = rows[0].shadow_model
+
+    axis_matches: dict[str, list[bool]] = {}
+    fully_agree = 0
+
+    for row in rows:
+        champion_raw = row.champion_prediction
+        shadow_raw = row.shadow_prediction
+        c_pred = json.loads(champion_raw) if isinstance(champion_raw, str) else champion_raw or {}
+        s_pred = json.loads(shadow_raw) if isinstance(shadow_raw, str) else shadow_raw or {}
+
+        all_match = True
+        for axis in c_pred:
+            c_code = c_pred[axis].get("code") if isinstance(c_pred[axis], dict) else None
+            s_code = s_pred.get(axis, {}).get("code") if isinstance(s_pred.get(axis), dict) else None
+            match = c_code == s_code
+            axis_matches.setdefault(axis, []).append(match)
+            if not match:
+                all_match = False
+        if all_match:
+            fully_agree += 1
+
+    total = len(rows)
+    per_axis = {axis: _safe_div(sum(m), len(m)) for axis, m in sorted(axis_matches.items())}
+
+    return ShadowComparison(
+        champion_model=champion_model,
+        shadow_model=shadow_model,
+        total_pairs=total,
+        agreement_count=fully_agree,
+        agreement_rate=_safe_div(fully_agree, total),
+        per_axis_agreement=per_axis,
+        lookback_days=lookback_days,
+        computed_at=datetime.now(UTC).isoformat(),
+    )
 
 
 # ---------------------------------------------------------------------------

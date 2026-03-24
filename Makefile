@@ -1,7 +1,9 @@
 .PHONY: setup install install-dev test test-all lint format clean \
         build-etl-dev build-train-pytorch-dev build-train-xgboost-dev build-serve-dev \
+        build-train-ner-dev build-train-ner-prod \
         build-etl-prod build-train-pytorch-prod build-train-xgboost-prod build-serve-prod \
-        build-all-dev deploy-etl-dev rehydrate
+        build-all-dev deploy-etl-dev rehydrate compile-pipeline run-vizier-sweep \
+        trigger-retrain-dev
 
 # ---------- Setup ----------
 setup: install-dev
@@ -43,7 +45,10 @@ build-train-xgboost-dev:
 build-serve-dev:
 	scripts/build_image.sh serve dev
 
-build-all-dev: build-etl-dev build-train-pytorch-dev build-train-xgboost-dev build-serve-dev
+build-train-ner-dev:
+	scripts/build_image.sh train-ner dev
+
+build-all-dev: build-etl-dev build-train-pytorch-dev build-train-xgboost-dev build-serve-dev build-train-ner-dev
 	@echo "✅ All dev images built and pushed."
 
 deploy-etl-dev: build-etl-dev
@@ -69,8 +74,30 @@ build-train-xgboost-prod:
 build-serve-prod:
 	scripts/build_image.sh serve prod
 
+build-train-ner-prod:
+	scripts/build_image.sh train-ner prod
+
 deploy-serve-prod: build-serve-prod
 	@echo "Prod serving image built. Deploy via: cd ../infra/environments/ml && terraform apply"
+
+# ---------- Pipeline ----------
+compile-pipeline:
+	conda run -n ml python -c "\
+	from ml.training.pipeline import training_pipeline; \
+	from kfp import compiler; \
+	compiler.Compiler().compile(training_pipeline, 'pipelines/training_pipeline.yaml'); \
+	print('Compiled to pipelines/training_pipeline.yaml')"
+
+# ---------- Vizier ----------
+CONFIG ?= pipelines/configs/classification_xgboost.yaml
+TRIALS ?= 15
+run-vizier-sweep:
+	conda run -n ml python -m ml.training.vizier --config $(CONFIG) --max-trials $(TRIALS)
+
+# ---------- Retrain Trigger ----------
+CAPABILITY ?= classification
+trigger-retrain-dev:
+	conda run -n ml python scripts/trigger_retraining.py --capability $(CAPABILITY)
 
 # ---------- Clean ----------
 clean:

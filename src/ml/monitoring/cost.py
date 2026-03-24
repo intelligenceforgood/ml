@@ -219,3 +219,48 @@ def _get_bq_client() -> bigquery.Client:
         settings = get_settings()
         _bq_client = bq.Client(project=settings.platform.project_id)
     return _bq_client
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point (for Cloud Run Job / Cloud Scheduler)
+# ---------------------------------------------------------------------------
+
+
+def main() -> None:
+    """Run cost materialization — intended as Cloud Run Job entry point."""
+    import uuid
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+    comparison = compare_to_llm_cost()
+    settings = get_settings()
+    bq_client = _get_bq_client()
+    table = f"{settings.platform.project_id}.{settings.bigquery.dataset_id}.analytics_cost_summary"
+
+    from datetime import timedelta
+
+    now = datetime.now(UTC)
+    row = {
+        "summary_id": str(uuid.uuid4()),
+        "model_id": None,
+        "capability": "classification",
+        "prediction_count": comparison.total_predictions,
+        "ml_cost_per_prediction": comparison.ml_cost_per_prediction,
+        "llm_cost_per_prediction": comparison.llm_cost_per_prediction,
+        "ml_total": comparison.ml_total_cost,
+        "llm_total": comparison.llm_equivalent_cost,
+        "savings_pct": comparison.savings_percentage,
+        "period_start": (now - timedelta(days=comparison.period_days)).isoformat(),
+        "period_end": now.isoformat(),
+        "computed_at": now.isoformat(),
+    }
+
+    errors = bq_client.insert_rows_json(table, [row])
+    if errors:
+        logger.error("BigQuery insert errors for analytics_cost_summary: %s", errors)
+    else:
+        logger.info("Cost materialization complete — savings: %.1f%%", comparison.savings_percentage)
+
+
+if __name__ == "__main__":
+    main()

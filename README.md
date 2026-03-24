@@ -12,7 +12,7 @@ pytest tests/unit              # run unit tests
 ## Structure
 
 ```
-src/i4g_ml/
+src/ml/
 ├── config.py                  # Settings
 ├── data/                      # ETL, features, datasets, validation
 ├── training/                  # Pipeline, config, evaluation
@@ -21,4 +21,4 @@ src/i4g_ml/
 └── monitoring/                # Drift, accuracy, cost, triggers
 ```
 
-See [docs/design/ml_platform_tdd.md](docs/design/ml_platform_tdd.md) for full architecture.
+See [docs/design/ml_infrastructure_tdd.md](docs/design/ml_infrastructure_tdd.md) for full architecture.

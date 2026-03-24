@@ -50,6 +50,9 @@ class TrainingConfig(BaseModel):
     # Eval gate
     eval_gate: EvalGateConfig = Field(default_factory=EvalGateConfig)
 
+    # Vizier
+    enable_vizier: bool = False
+
     # Resources
     data_bucket: str = "i4g-ml-data"
     machine_type: str = "n1-standard-4"

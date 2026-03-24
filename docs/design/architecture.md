@@ -28,6 +28,7 @@ graph TB
             PIPELINE[Vertex AI Pipeline<br/>KFP v2]
             TRAIN_PT[train-pytorch<br/>Gemma 2B LoRA]
             TRAIN_XGB[train-xgboost<br/>Tabular]
+            TRAIN_NER[train-ner<br/>BERT Token Clf]
             REGISTRY[Vertex AI<br/>Model Registry]
         end
 
@@ -36,6 +37,12 @@ graph TB
             SERVE[Serving Container<br/>FastAPI]
             BQ_PRED[(BigQuery<br/>prediction_log)]
             BQ_OUT[(BigQuery<br/>outcome_log)]
+        end
+
+        subgraph "Monitoring"
+            DRIFT[Drift Detection<br/>Cloud Run Job]
+            RETRAIN[Retraining Trigger<br/>Cloud Run Job]
+            SHADOW[Shadow Inference<br/>A/B logging]
         end
 
         AR[Artifact Registry<br/>containers]
@@ -49,17 +56,25 @@ graph TB
     PIPELINE --> GCS_DATA
     PIPELINE --> TRAIN_PT
     PIPELINE --> TRAIN_XGB
+    PIPELINE --> TRAIN_NER
     TRAIN_PT --> GCS_ARTIFACTS
     TRAIN_XGB --> GCS_ARTIFACTS
+    TRAIN_NER --> GCS_ARTIFACTS
     GCS_ARTIFACTS --> REGISTRY
     REGISTRY --> ENDPOINT
     ENDPOINT --> SERVE
     SERVE --> BQ_PRED
     SERVE --> BQ_OUT
-    CoreAPI -->|classify request| ENDPOINT
+    CoreAPI -->|classify / extract-entities| ENDPOINT
+    BQ_PRED --> DRIFT
+    DRIFT --> RETRAIN
+    RETRAIN -->|submit pipeline| PIPELINE
+    SERVE -.->|async| SHADOW
+    SHADOW --> BQ_PRED
     AR -.->|container images| ETL
     AR -.->|container images| TRAIN_PT
     AR -.->|container images| TRAIN_XGB
+    AR -.->|container images| TRAIN_NER
     AR -.->|container images| SERVE
 ```
 
@@ -95,6 +110,42 @@ graph TB
 
 7. **Integration** — Core's `MLPlatformClient` calls the serving endpoint. When `inference_backend =
 "ml_platform"`, the Core API routes classification through the ML Platform instead of the LLM fallback.
+   When `entity_extraction_backend = "ml_platform"`, the Core API routes entity extraction through the
+   ML Platform NER endpoint instead of LLM-based extraction.
+
+## NER Capability
+
+The platform supports Named Entity Recognition (NER) as a second capability alongside classification.
+
+### Entity Types
+
+| Entity Type   | BIO Tags             | Core Schema Key    |
+| ------------- | -------------------- | ------------------ |
+| PERSON        | B-PERSON, I-PERSON   | `people`           |
+| ORG           | B-ORG, I-ORG         | `organizations`    |
+| CRYPTO_WALLET | B-CRYPTO_WALLET, ... | `wallet_addresses` |
+| BANK_ACCOUNT  | B-BANK_ACCOUNT, ...  | `wallet_addresses` |
+| PHONE         | B-PHONE, I-PHONE     | `contact_channels` |
+| EMAIL         | B-EMAIL, I-EMAIL     | `contact_channels` |
+| URL           | B-URL, I-URL         | `contact_channels` |
+
+### Training
+
+NER uses `dslim/bert-base-NER` as a base model, fine-tuned with `AutoModelForTokenClassification`.
+Training data is exported from the `raw_entities` BigQuery table via `create_ner_dataset_version()`.
+The training container is `train-ner` and the pipeline config is `pipelines/configs/ner_bert.yaml`.
+
+### Serving
+
+The serving container loads NER models from `NER_MODEL_ARTIFACT_URI` alongside the classification
+model. NER predictions are served via `POST /predict/extract-entities` and logged to BigQuery with
+`capability="ner"`. When no NER model URI is configured, the endpoint returns 503.
+
+### Evaluation
+
+NER evaluation uses the `seqeval` library with BIO tagging. The primary metric is entity micro F1.
+Per-entity-type metrics (precision, recall, F1) are tracked for regression detection during model
+promotion.
 
 ## Cross-Project IAM
 
@@ -106,35 +157,42 @@ graph TB
 
 ## Key Components
 
-| Component  | Location                        | Description                           |
-| ---------- | ------------------------------- | ------------------------------------- |
-| ETL        | `src/ml/data/etl.py`            | Incremental Cloud SQL → BigQuery sync |
-| Validation | `src/ml/data/validation.py`     | Dataset quality checks                |
-| Datasets   | `src/ml/data/datasets.py`       | Dataset creation, split, export       |
-| PII        | `src/ml/data/pii.py`            | Regex-based PII redaction             |
-| Evaluation | `src/ml/training/evaluation.py` | Per-axis P/R/F1, EvalResult           |
-| Baseline   | `src/ml/training/baseline.py`   | Few-shot LLM benchmark                |
-| Pipeline   | `src/ml/training/pipeline.py`   | KFP v2 5-stage pipeline               |
-| Promotion  | `src/ml/registry/promotion.py`  | Eval gate + stage transitions         |
-| Registry   | `src/ml/registry/models.py`     | Vertex AI Model Registry helpers      |
-| Serving    | `src/ml/serving/app.py`         | FastAPI prediction API                |
-| Logging    | `src/ml/serving/logging.py`     | BQ prediction/outcome logging         |
-| Features   | `src/ml/serving/features.py`    | Inline feature computation            |
-| Config     | `src/ml/training/config.py`     | TrainingConfig Pydantic model         |
-| Refresh    | `src/ml/data/refresh.py`        | Automated dataset refresh pipeline    |
+| Component  | Location                        | Description                                 |
+| ---------- | ------------------------------- | ------------------------------------------- |
+| ETL        | `src/ml/data/etl.py`            | Incremental Cloud SQL → BigQuery sync       |
+| Validation | `src/ml/data/validation.py`     | Dataset quality checks                      |
+| Datasets   | `src/ml/data/datasets.py`       | Dataset creation, split, export (clf + NER) |
+| PII        | `src/ml/data/pii.py`            | Regex-based PII redaction                   |
+| Evaluation | `src/ml/training/evaluation.py` | Per-axis P/R/F1 + NER entity-level metrics  |
+| Baseline   | `src/ml/training/baseline.py`   | Few-shot LLM benchmark                      |
+| Pipeline   | `src/ml/training/pipeline.py`   | KFP v2 5-stage pipeline                     |
+| Vizier     | `src/ml/training/vizier.py`     | Vertex AI Vizier hyperparameter tuning      |
+| Promotion  | `src/ml/registry/promotion.py`  | Eval gate + stage transitions (clf + NER)   |
+| Registry   | `src/ml/registry/models.py`     | Vertex AI Model Registry helpers            |
+| Serving    | `src/ml/serving/app.py`         | FastAPI prediction API (classify + NER)     |
+| Predict    | `src/ml/serving/predict.py`     | Inference logic (clf + NER + shadow)        |
+| Logging    | `src/ml/serving/logging.py`     | BQ prediction/outcome logging               |
+| Features   | `src/ml/serving/features.py`    | Inline feature computation                  |
+| Config     | `src/ml/training/config.py`     | TrainingConfig Pydantic model               |
+| Refresh    | `src/ml/data/refresh.py`        | Automated dataset refresh pipeline          |
+| Drift      | `src/ml/monitoring/drift.py`    | PSI-based feature distribution drift        |
+| Triggers   | `src/ml/monitoring/triggers.py` | Automated retraining trigger evaluation     |
+| Cost       | `src/ml/monitoring/cost.py`     | Training cost tracking and reporting        |
+| Accuracy   | `src/ml/monitoring/accuracy.py` | Shadow model comparison metrics             |
 
 ## Framework Selection Criteria
 
-The platform supports two training frameworks. Selection depends on the use case:
+The platform supports multiple training frameworks. Selection depends on the use case:
 
-| Criterion         | XGBoost (Tabular)                 | PyTorch — Gemma 2B LoRA               |
-| ----------------- | --------------------------------- | ------------------------------------- |
-| **Input**         | Pre-computed BigQuery features    | Raw narrative text                    |
-| **Training time** | < 10 min (CPU)                    | 30–60 min (GPU)                       |
-| **Cost / run**    | ~$0.50 (n1-standard-4, no GPU)    | ~$5–10 (T4 GPU)                       |
-| **Cold start**    | < 1 s                             | 5–10 s (model + tokenizer load)       |
-| **Accuracy**      | Good baseline for structured data | Higher ceiling with rich text signals |
-| **When to use**   | Rapid iteration, cost-sensitive   | Production accuracy, text-heavy cases |
+| Criterion         | XGBoost (Tabular)                 | PyTorch — Gemma 2B LoRA               | BERT NER (Token Clf)                |
+| ----------------- | --------------------------------- | ------------------------------------- | ----------------------------------- |
+| **Capability**    | Classification                    | Classification                        | Named Entity Recognition            |
+| **Input**         | Pre-computed BigQuery features    | Raw narrative text                    | Raw narrative text                  |
+| **Training time** | < 10 min (CPU)                    | 30–60 min (GPU)                       | 15–30 min (GPU)                     |
+| **Cost / run**    | ~$0.50 (n1-standard-4, no GPU)    | ~$5–10 (T4 GPU)                       | ~$3–5 (T4 GPU)                      |
+| **Cold start**    | < 1 s                             | 5–10 s (model + tokenizer load)       | 3–5 s (BERT load)                   |
+| **Accuracy**      | Good baseline for structured data | Higher ceiling with rich text signals | Depends on entity annotation volume |
+| **When to use**   | Rapid iteration, cost-sensitive   | Production accuracy, text-heavy cases | Entity extraction from case text    |
 
 **Decision rule:** Start with XGBoost for fast iteration and baseline metrics. Switch to PyTorch
 when XGBoost plateaus and the accuracy gap justifies the GPU cost. Both frameworks share the same

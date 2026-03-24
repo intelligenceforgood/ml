@@ -40,6 +40,17 @@ eval_gate:
   min_overall_f1: 0.0 # Phase 0: no minimum — just establishing baseline
   max_per_axis_regression: 0.05
 
+# Vizier hyperparameter search space (used when enable_vizier: true)
+vizier_search_space:
+  learning_rate:
+    min: 0.00001
+    max: 0.0005
+    scale: "log"
+  lora_r:
+    values: [4, 8, 16]
+  batch_size:
+    values: [8, 16, 32]
+
 resources:
   machine_type: "n1-standard-4"
   gpu_type: "NVIDIA_TESLA_T4"

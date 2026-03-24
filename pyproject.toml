@@ -26,6 +26,10 @@ name = "i4g-ml"
 requires-python = ">=3.11"
 version = "0.1.0"
 
+[project.urls]
+documentation = "https://docs.i4g.dev/ml"
+repository = "https://github.com/i4g/ml"
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
@@ -42,6 +46,7 @@ train-pytorch = [
   "datasets>=2.18",
   "evaluate>=0.4",
   "accelerate>=0.27",
+  "seqeval>=1.2",
 ]
 train-xgboost = [
   "xgboost>=2.0",

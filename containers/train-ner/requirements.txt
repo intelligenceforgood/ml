@@ -1,0 +1,11 @@
+peft>=0.8
+datasets>=2.18
+evaluate>=0.4
+accelerate>=0.27
+seqeval>=1.2
+safetensors>=0.4
+google-cloud-bigquery>=3.10
+google-cloud-storage>=2.10
+google-cloud-aiplatform>=1.40
+pydantic>=2.5
+pyyaml>=6.0

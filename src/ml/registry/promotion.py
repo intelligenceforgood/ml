@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from google.cloud import aiplatform
 
 from ml.config import get_settings
-from ml.training.evaluation import EvalResult
+from ml.training.evaluation import EvalResult, NerEvalResult
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +55,42 @@ def _passes_eval_gate(
     return True, "Eval gate passed"
 
 
+def _passes_ner_eval_gate(
+    candidate: NerEvalResult,
+    champion: NerEvalResult | None,
+    *,
+    max_regression: float = 0.05,
+) -> tuple[bool, str]:
+    """Check if a NER candidate passes the eval gate vs the champion.
+
+    NER uses entity micro F1 as the primary metric and checks per-entity-type
+    regression.
+    """
+    if champion is None:
+        return True, "No existing NER champion — first model passes automatically"
+
+    if candidate.micro_f1 < champion.micro_f1:
+        return False, (f"Candidate entity micro F1 ({candidate.micro_f1:.4f}) < " f"champion ({champion.micro_f1:.4f})")
+
+    # Per-entity-type regression check
+    for entity_type, cand_m in candidate.per_entity_type.items():
+        if entity_type in champion.per_entity_type:
+            champ_f1 = champion.per_entity_type[entity_type].f1
+            regression = champ_f1 - cand_m.f1
+            if regression > max_regression:
+                return False, (
+                    f"Entity type '{entity_type}' regressed by {regression:.4f} " f"(max allowed {max_regression:.4f})"
+                )
+
+    return True, "NER eval gate passed"
+
+
 def promote_model(
     model_name: str,
-    candidate_metrics: EvalResult,
-    champion_metrics: EvalResult | None = None,
+    candidate_metrics: EvalResult | NerEvalResult,
+    champion_metrics: EvalResult | NerEvalResult | None = None,
     *,
+    capability: str = "classification",
     target_stage: str = "candidate",
     max_regression: float = 0.05,
 ) -> PromotionDecision:
@@ -71,7 +102,18 @@ def promote_model(
     )
 
     if target_stage == "candidate":
-        passed, reason = _passes_eval_gate(candidate_metrics, champion_metrics, max_regression=max_regression)
+        if capability == "ner":
+            passed, reason = _passes_ner_eval_gate(
+                candidate_metrics,  # type: ignore[arg-type]
+                champion_metrics,  # type: ignore[arg-type]
+                max_regression=max_regression,
+            )
+        else:
+            passed, reason = _passes_eval_gate(
+                candidate_metrics,  # type: ignore[arg-type]
+                champion_metrics,  # type: ignore[arg-type]
+                max_regression=max_regression,
+            )
         if not passed:
             logger.warning("Promotion rejected: %s", reason)
             return PromotionDecision(

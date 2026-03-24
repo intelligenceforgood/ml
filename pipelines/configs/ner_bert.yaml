@@ -1,0 +1,52 @@
+# NER training config — BERT token classification
+# Fine-tunes a pre-trained NER model (dslim/bert-base-NER) on I4G entity data
+#
+# Entity types: PERSON, ORG, CRYPTO_WALLET, BANK_ACCOUNT, PHONE, EMAIL, URL
+
+model_id: "ner-bert-v1"
+capability: "ner"
+base_model: "dslim/bert-base-NER"
+framework: "pytorch"
+training_type: "fine-tune"
+
+hyperparameters:
+  epochs: 5
+  batch_size: 16
+  learning_rate: 0.00005
+  warmup_ratio: 0.1
+  weight_decay: 0.01
+  max_length: 512
+
+label_schema:
+  entity_types:
+    - PERSON
+    - ORG
+    - CRYPTO_WALLET
+    - BANK_ACCOUNT
+    - PHONE
+    - EMAIL
+    - URL
+
+eval_gate:
+  min_entity_micro_f1: 0.0 # Phase 1: establishing NER baseline
+  max_per_entity_regression: 0.05
+
+# Vizier hyperparameter search space (used when enable_vizier: true)
+vizier_search_space:
+  learning_rate:
+    min: 0.00001
+    max: 0.0001
+    scale: "log"
+  num_train_epochs:
+    min: 3
+    max: 10
+  warmup_ratio:
+    min: 0.0
+    max: 0.2
+
+resources:
+  machine_type: "n1-highmem-4"
+  gpu_type: "NVIDIA_TESLA_T4"
+  gpu_count: 1
+
+data_bucket: "i4g-ml-data"

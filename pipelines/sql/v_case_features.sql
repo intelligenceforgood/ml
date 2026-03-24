@@ -46,7 +46,6 @@ FROM `i4g-ml.i4g_ml.raw_cases` c
 LEFT JOIN
 (
   SELECT case_id, COUNT(*) AS entity_count, COUNT(DISTINCT entity_type) AS unique_entity_types, LOGICAL_OR(entity_type = 'crypto_wallet') AS has_crypto_wallet, LOGICAL_OR(entity_type = 'bank_account') AS has_bank_account, LOGICAL_OR(entity_type = 'phone') AS has_phone, LOGICAL_OR(entity_type = 'email') AS has_email
-FROM `i4g
--ml.i4g_ml.raw_entities`
+FROM `i4g-ml.i4g_ml.raw_entities`
   GROUP BY case_id
 ) ent ON c.case_id = ent.case_id

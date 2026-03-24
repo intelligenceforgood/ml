@@ -353,6 +353,7 @@ def register_model(
     display_name: str,
     serving_container_uri: str,
     eval_passed: str,
+    capability: str,
 ) -> str:
     """Register a trained model in Vertex AI Model Registry.
 
@@ -368,7 +369,7 @@ def register_model(
         display_name=display_name,
         artifact_uri=model_uri,
         serving_container_image_uri=serving_container_uri,
-        labels={"stage": "candidate", "capability": "classification"},
+        labels={"stage": "candidate", "capability": capability},
     )
     return model.resource_name
 
@@ -453,6 +454,7 @@ def training_pipeline(
         display_name=experiment_name,
         serving_container_uri=serving_container_uri,
         eval_passed=evaluate.outputs["passed"],
+        capability=capability,
     )
     deploy_model(
         project_id=project_id,
