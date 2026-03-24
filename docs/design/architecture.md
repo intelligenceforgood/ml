@@ -147,6 +147,65 @@ NER evaluation uses the `seqeval` library with BIO tagging. The primary metric i
 Per-entity-type metrics (precision, recall, F1) are tracked for regression detection during model
 promotion.
 
+## Shadow Mode
+
+Shadow mode runs a candidate model alongside the champion on production traffic without affecting
+responses. The champion prediction is returned synchronously; the shadow prediction runs as an
+async background task and is logged to `prediction_log` with `is_shadow=TRUE`.
+
+**Activation:** Set the `SHADOW_MODEL_ARTIFACT_URI` env var on the Cloud Run service to the GCS
+path of the candidate model's artifacts. Set it to empty string to disable.
+
+**Memory guard:** After loading both models, the serving container logs total RSS. If RSS exceeds
+80% of instance memory, shadow loading is skipped and a warning is logged.
+
+**Comparison query:**
+
+```sql
+SELECT
+  c.prediction_id AS champion_id,
+  s.prediction_id AS shadow_id,
+  c.prediction AS champion_pred,
+  s.prediction AS shadow_pred
+FROM `i4g-ml.i4g_ml.predictions_prediction_log` c
+JOIN `i4g-ml.i4g_ml.predictions_prediction_log` s
+  ON s.prediction_id = CONCAT(c.prediction_id, '-shadow')
+WHERE c.is_shadow IS NOT TRUE
+ORDER BY c.timestamp DESC
+LIMIT 100;
+```
+
+## Graph Features (Dataflow/Beam)
+
+Network-based features are computed via an Apache Beam pipeline that processes entity co-occurrence
+across cases. The pipeline runs weekly (Sunday 4 AM UTC) as a Cloud Run Job that submits a
+Dataflow job.
+
+**Features produced:**
+
+| Feature                  | Description                                                     |
+| ------------------------ | --------------------------------------------------------------- |
+| `shared_entity_count`    | Distinct entities this case shares with other cases             |
+| `entity_reuse_frequency` | Average number of cases each of this case's entities appears in |
+| `cluster_size`           | Size of the connected component this case belongs to            |
+
+**Pipeline stages:**
+
+1. Read entity-case pairs from BigQuery `raw_entities`
+2. Group by entity → list of case IDs
+3. Emit co-occurrence pairs for entities shared by ≥ 2 cases
+4. Per-case aggregation (shared count, reuse frequency)
+5. Connected components via NetworkX (single DoFn — viable at ~10K cases)
+6. Merge features → write to `features_graph_features` (WRITE_TRUNCATE)
+
+**Local development:**
+
+```bash
+conda run -n ml python -m ml.data.graph_features --runner DirectRunner
+```
+
+**Source:** `src/ml/data/graph_features.py`
+
 ## Cross-Project IAM
 
 | Principal               | Target Project | Role                    | Purpose                          |

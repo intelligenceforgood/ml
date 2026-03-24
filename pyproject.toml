@@ -39,6 +39,10 @@ dev = [
   "isort>=5.13",
   "pre-commit>=3.6",
 ]
+graph = [
+  "apache-beam[gcp]>=2.55,<3",
+  "networkx>=3.2,<4",
+]
 train-pytorch = [
   "torch>=2.1",
   "transformers>=4.38",

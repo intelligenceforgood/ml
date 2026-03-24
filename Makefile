@@ -1,9 +1,10 @@
 .PHONY: setup install install-dev test test-all lint format clean \
         build-etl-dev build-train-pytorch-dev build-train-xgboost-dev build-serve-dev \
         build-train-ner-dev build-train-ner-prod \
+        build-graph-features-dev build-graph-features-prod \
         build-etl-prod build-train-pytorch-prod build-train-xgboost-prod build-serve-prod \
         build-all-dev deploy-etl-dev rehydrate compile-pipeline run-vizier-sweep \
-        trigger-retrain-dev
+        trigger-retrain-dev submit-graph-features-dev
 
 # ---------- Setup ----------
 setup: install-dev
@@ -48,7 +49,13 @@ build-serve-dev:
 build-train-ner-dev:
 	scripts/build_image.sh train-ner dev
 
-build-all-dev: build-etl-dev build-train-pytorch-dev build-train-xgboost-dev build-serve-dev build-train-ner-dev
+build-graph-features-dev:
+	scripts/build_image.sh graph-features dev
+
+build-graph-features-prod:
+	scripts/build_image.sh graph-features prod
+
+build-all-dev: build-etl-dev build-train-pytorch-dev build-train-xgboost-dev build-serve-dev build-train-ner-dev build-graph-features-dev
 	@echo "✅ All dev images built and pushed."
 
 deploy-etl-dev: build-etl-dev
@@ -98,6 +105,15 @@ run-vizier-sweep:
 CAPABILITY ?= classification
 trigger-retrain-dev:
 	conda run -n ml python scripts/trigger_retraining.py --capability $(CAPABILITY)
+
+# ---------- Graph Features ----------
+submit-graph-features-dev:
+	conda run -n ml python -m ml.data.graph_features \
+		--project i4g-ml --dataset i4g_ml \
+		--runner DataflowRunner \
+		--temp-location gs://i4g-ml-data/dataflow/temp \
+		--staging-location gs://i4g-ml-data/dataflow/staging \
+		--region us-central1
 
 # ---------- Clean ----------
 clean:

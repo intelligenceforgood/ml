@@ -163,6 +163,51 @@ print(result)
 "
 ```
 
+## 10. Run Vizier Hyperparameter Sweep
+
+Vertex AI Vizier automates hyperparameter tuning via Bayesian optimization:
+
+```bash
+# XGBoost sweep (10 trials, CPU — ~$5 total)
+conda run -n ml make run-vizier-sweep CONFIG=pipelines/configs/classification_xgboost.yaml TRIALS=10
+
+# PyTorch sweep (5 trials, GPU — ~$25-50 total)
+conda run -n ml make run-vizier-sweep CONFIG=pipelines/configs/classification_gemma2b.yaml TRIALS=5
+```
+
+Vizier manages the study externally — it suggests trial parameters, you submit a pipeline with those
+params, report the eval metric back, and Vizier selects the next trial. Results are logged to the
+Vizier study and can be queried:
+
+```bash
+gcloud ai hp-tuning-jobs list --project=i4g-ml --region=us-central1
+```
+
+## 11. Run Dataflow Graph Features Pipeline
+
+The graph features pipeline computes entity co-occurrence features:
+
+```bash
+# Local validation with DirectRunner
+conda run -n ml python -m ml.data.graph_features --runner DirectRunner
+
+# Submit to Dataflow (production)
+conda run -n ml make submit-graph-features-dev
+```
+
+Monitor the Dataflow job:
+
+```bash
+gcloud dataflow jobs list --project=i4g-ml --region=us-central1 --status=active
+```
+
+Verify output:
+
+```sql
+SELECT COUNT(*), MIN(_computed_at), MAX(_computed_at)
+FROM `i4g-ml.i4g_ml.features_graph_features`;
+```
+
 ## Rollback
 
 To roll back a model deployment:

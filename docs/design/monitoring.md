@@ -236,6 +236,72 @@ Dashboard tiles link to the Cloud Monitoring alert policies:
   | P99 latency | > 2000ms | > 5000ms | Scale endpoint, check model size |
   | Per-axis F1 drop | > 5% vs champion | > 10% vs champion | Block promotion, investigate |
 
+## Drift Metrics Queries
+
+Drift detection runs daily at 6 AM UTC via a Cloud Run Job. Results are materialized to `analytics_drift_metrics`.
+
+### Latest Drift Report
+
+```sql
+SELECT
+  report_id,
+  model_id,
+  report_type,
+  axis_or_feature,
+  baseline_rate,
+  current_rate,
+  psi,
+  is_drifted,
+  window_start,
+  window_end
+FROM `i4g-ml.i4g_ml.analytics_drift_metrics`
+WHERE computed_at = (
+  SELECT MAX(computed_at) FROM `i4g-ml.i4g_ml.analytics_drift_metrics`
+)
+ORDER BY psi DESC;
+```
+
+### Drift Trend (last 30 days)
+
+```sql
+SELECT
+  DATE(computed_at) AS report_date,
+  report_type,
+  axis_or_feature,
+  psi,
+  is_drifted
+FROM `i4g-ml.i4g_ml.analytics_drift_metrics`
+WHERE computed_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
+ORDER BY computed_at DESC, psi DESC;
+```
+
+### Retraining Trigger Log
+
+```sql
+SELECT
+  event_id,
+  capability,
+  should_retrain,
+  reasons,
+  new_label_count,
+  max_drift_psi,
+  pipeline_job_name,
+  triggered_at
+FROM `i4g-ml.i4g_ml.analytics_trigger_log`
+ORDER BY triggered_at DESC
+LIMIT 20;
+```
+
+## Dashboard Access
+
+The Looker Studio dashboard is accessible to all project members. To view:
+
+1. Open Looker Studio at https://lookerstudio.google.com
+2. Find the "ML Platform Monitoring" dashboard under the I4G workspace
+3. Use the date range filter (default: last 30 days) and model version filter
+
+Data freshness: tables are updated by Cloud Scheduler jobs at 5:00–6:30 AM UTC daily.
+
 ## Vertex AI Model Monitoring
 
 Vertex AI provides built-in model monitoring. Configure via Terraform or console:
