@@ -4,6 +4,10 @@
 > **Prerequisites:** Exercise 3 completed (a model registered in Vertex AI Model Registry)
 > **Time:** ~20 minutes
 
+> **Partially offline.** Steps 4–5 (manual eval and gate simulation) run entirely in a local
+> Python shell — no GCP needed. Steps 3 and 6 use `bq` and `gcloud` against live data.
+> Run `conda run -n ml pytest tests/unit/test_evaluation.py -v` to validate eval logic locally.
+
 ---
 
 ## Overview

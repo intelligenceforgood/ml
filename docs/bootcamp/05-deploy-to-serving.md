@@ -4,6 +4,10 @@
 > **Prerequisites:** Exercise 4 completed, model promoted to `candidate` or `champion`
 > **Time:** ~25 minutes
 
+> **Requires GCP access.** All steps interact with Cloud Run and BigQuery. Without access,
+> read through the exercise, then run `conda run -n ml pytest tests/unit/test_serving.py -v`
+> to validate the serving logic locally.
+
 ---
 
 ## Overview

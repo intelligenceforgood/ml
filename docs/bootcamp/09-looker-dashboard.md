@@ -4,6 +4,10 @@
 > **Prerequisites:** BigQuery `analytics_*` tables populated (Exercises 5–6), Google account with Looker Studio access
 > **Time:** ~45 minutes
 
+> **Requires GCP access.** This exercise is entirely GUI-based in Looker Studio and BigQuery.
+> Without access, read through the exercise to understand the monitoring dashboard design
+> and which BigQuery tables feed each chart.
+
 ---
 
 ## Overview
@@ -12,12 +16,12 @@ The ML platform materializes monitoring data into four BigQuery tables. This exe
 
 **Data sources:**
 
-| BigQuery table | Content | Refreshed |
-|---------------|---------|-----------|
-| `analytics_model_performance` | Per-model per-axis accuracy, override rate | Daily 5 AM UTC |
-| `analytics_drift_metrics` | PSI scores for prediction and feature drift | Daily 6 AM UTC |
-| `analytics_cost_summary` | ML vs. LLM cost per prediction | Daily 5:30 AM UTC |
-| `predictions_prediction_log` | Raw prediction records | Real-time |
+| BigQuery table                | Content                                     | Refreshed         |
+| ----------------------------- | ------------------------------------------- | ----------------- |
+| `analytics_model_performance` | Per-model per-axis accuracy, override rate  | Daily 5 AM UTC    |
+| `analytics_drift_metrics`     | PSI scores for prediction and feature drift | Daily 6 AM UTC    |
+| `analytics_cost_summary`      | ML vs. LLM cost per prediction              | Daily 5:30 AM UTC |
+| `predictions_prediction_log`  | Raw prediction records                      | Real-time         |
 
 ---
 
@@ -72,6 +76,7 @@ cat pipelines/sql/analytics_drift_metrics.sql
 3. Add data source: **BigQuery** → Project: `i4g-ml` → Dataset: `i4g_ml`
 
 Add these four tables as data sources:
+
 - `analytics_model_performance`
 - `analytics_drift_metrics`
 - `analytics_cost_summary`
@@ -84,21 +89,25 @@ Add these four tables as data sources:
 **Charts to create:**
 
 ### Rolling F1 per model per axis (Line chart)
+
 - **Dimension:** `computed_at` (Date)
 - **Breakdown:** `model_id`
 - **Metric:** `overall_f1`
 - **Filter:** Date range selector (last 30 days default)
 
 ### Override rate trend (Bar chart)
+
 - **Dimension:** `computed_at` (Date)
 - **Metric:** Calculate override rate from `predictions_prediction_log` + `predictions_outcome_log`
 - Shows how often analysts override model predictions
 
 ### Confusion matrix (Table - latest period)
+
 - **Data source:** Custom query or calculated field
 - **Shows:** Predicted vs. actual label distribution for the latest evaluation period
 
 ### Drift indicators (Scorecard cards)
+
 - **Data source:** `analytics_drift_metrics`
 - **Metric:** Latest PSI scores per axis
 - **Conditional formatting:** Green (PSI < 0.1), Yellow (0.1–0.2), Red (> 0.2)
@@ -108,16 +117,19 @@ Add these four tables as data sources:
 ## Step 5: Build Page 2 — Cost Dashboard
 
 ### Per-prediction cost comparison (Bar chart by capability)
+
 - **Dimension:** `capability`
 - **Metrics:** `ml_cost_per_prediction`, `llm_cost_per_prediction`
 - Side-by-side comparison showing ML platform savings
 
 ### Cumulative savings (Line chart)
+
 - **Dimension:** `period_end` (Date)
 - **Metric:** Calculate `(llm_total - ml_total)` as cumulative savings
 - Shows total cost savings over time
 
 ### Cost breakdown by GCP component (Pie chart)
+
 - **Data source:** Cost data broken down by component (Vertex AI, Cloud Run, BigQuery, Storage)
 - Shows where ML platform costs are allocated
 
@@ -145,6 +157,7 @@ Add these four tables as data sources:
 These queries can be used as custom data sources in Looker Studio:
 
 **Latest accuracy per model:**
+
 ```sql
 SELECT model_id, overall_f1, overall_precision, overall_recall, computed_at
 FROM `i4g-ml.i4g_ml.analytics_model_performance`
@@ -155,6 +168,7 @@ WHERE computed_at = (
 ```
 
 **Drift status:**
+
 ```sql
 SELECT model_id, axis_or_feature, psi, is_drifted, report_type, computed_at
 FROM `i4g-ml.i4g_ml.analytics_drift_metrics`
@@ -163,6 +177,7 @@ ORDER BY psi DESC
 ```
 
 **Cost savings:**
+
 ```sql
 SELECT capability,
        SUM(ml_total) as total_ml_cost,
@@ -177,10 +192,10 @@ GROUP BY capability
 
 ## Summary
 
-| Page | Charts | Data source |
-|------|--------|-------------|
+| Page     | Charts                                                             | Data source                                              |
+| -------- | ------------------------------------------------------------------ | -------------------------------------------------------- |
 | Accuracy | Rolling F1 line, override rate bar, confusion matrix, drift scores | `analytics_model_performance`, `analytics_drift_metrics` |
-| Cost | Per-prediction cost bar, cumulative savings line, component pie | `analytics_cost_summary` |
+| Cost     | Per-prediction cost bar, cumulative savings line, component pie    | `analytics_cost_summary`                                 |
 
 This dashboard provides at-a-glance visibility into ML platform health. Combined with Cloud Monitoring alerts (configured in Terraform), the team is notified within 24 hours of any model regression.
 

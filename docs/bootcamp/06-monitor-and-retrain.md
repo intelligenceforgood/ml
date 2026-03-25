@@ -4,6 +4,11 @@
 > **Prerequisites:** Exercise 5 completed (predictions and outcomes in BigQuery)
 > **Time:** ~30 minutes
 
+> **Requires GCP access.** Steps use `bq` queries and submit jobs to the live project.
+> Without access, read through the exercise, then run
+> `conda run -n ml pytest tests/unit/test_drift.py tests/unit/test_triggers.py tests/unit/test_trigger_retraining.py -v`
+> to validate the monitoring logic locally.
+
 ---
 
 ## Overview

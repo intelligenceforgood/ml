@@ -1,11 +1,11 @@
 """XGBoost tabular feature classification training container.
 
-Entry point for training XGBoost models on tabular features from BigQuery.
-1. Loads training config from GCS
-2. Loads tabular features from BigQuery
+Entry point for training XGBoost models on tabular features.
+1. Loads training config from a local path or GCS
+2. Loads JSONL dataset splits (train/eval/test)
 3. Trains XGBoost classifier
-4. Logs metrics to Vertex AI Experiments
-5. Uploads model artifacts to GCS
+4. Logs metrics to Vertex AI Experiments (when running on GCP)
+5. Saves model artifacts locally or uploads to GCS
 """
 
 from __future__ import annotations
@@ -30,13 +30,25 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 
+def _is_gcs(path: str) -> bool:
+    """Return True if the path is a GCS URI."""
+    return path.startswith("gs://")
+
+
+def _resolve_path(path: str, local_dest: str) -> str:
+    """Download from GCS or return a local path as-is."""
+    if _is_gcs(path):
+        return download_from_gcs(path, local_dest)
+    return path
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments for XGBoost training."""
     parser = argparse.ArgumentParser(description="Train XGBoost model")
-    parser.add_argument("--config", required=True, help="GCS path to training config YAML")
-    parser.add_argument("--dataset", required=True, help="GCS path to dataset directory")
-    parser.add_argument("--experiment", required=True, help="Vertex AI Experiment name")
-    parser.add_argument("--output", default=None, help="GCS path for model artifacts")
+    parser.add_argument("--config", required=True, help="Path to training config YAML (local or gs://)")
+    parser.add_argument("--dataset", required=True, help="Path to dataset directory (local or gs://)")
+    parser.add_argument("--experiment", default="local", help="Vertex AI Experiment name")
+    parser.add_argument("--output", default=None, help="Path for model artifacts (local or gs://)")
     return parser.parse_args()
 
 
@@ -51,9 +63,9 @@ def download_from_gcs(gcs_path: str, local_path: str) -> str:
     return local_path
 
 
-def load_config(gcs_path: str) -> dict[str, Any]:
-    """Load training config YAML from GCS."""
-    local = download_from_gcs(gcs_path, "/tmp/training_config.yaml")
+def load_config(path: str) -> dict[str, Any]:
+    """Load training config YAML from a local path or GCS."""
+    local = _resolve_path(path, "/tmp/training_config.yaml")
     with open(local) as f:
         return yaml.safe_load(f)
 
@@ -152,42 +164,57 @@ def train(config: dict, train_data: list[dict], eval_data: list[dict]) -> Path:
     return output_dir
 
 
-def upload_artifacts(local_dir: Path, gcs_output: str) -> None:
-    """Upload model artifacts from a local directory to GCS."""
-    client = storage.Client()
-    parts = gcs_output.replace("gs://", "").split("/", 1)
-    bucket = client.bucket(parts[0])
-    prefix = parts[1].rstrip("/")
+def save_artifacts(local_dir: Path, output: str) -> None:
+    """Save model artifacts to a local directory or upload to GCS."""
+    if _is_gcs(output):
+        client = storage.Client()
+        parts = output.replace("gs://", "").split("/", 1)
+        bucket = client.bucket(parts[0])
+        prefix = parts[1].rstrip("/")
 
-    for local_file in local_dir.rglob("*"):
-        if local_file.is_file():
-            blob_path = f"{prefix}/{local_file.relative_to(local_dir)}"
-            bucket.blob(blob_path).upload_from_filename(str(local_file))
-            logger.info("Uploaded %s", blob_path)
+        for local_file in local_dir.rglob("*"):
+            if local_file.is_file():
+                blob_path = f"{prefix}/{local_file.relative_to(local_dir)}"
+                bucket.blob(blob_path).upload_from_filename(str(local_file))
+                logger.info("Uploaded %s", blob_path)
+    else:
+        import shutil
+
+        dest = Path(output)
+        dest.mkdir(parents=True, exist_ok=True)
+        for src_file in local_dir.rglob("*"):
+            if src_file.is_file():
+                target = dest / src_file.relative_to(local_dir)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_file, target)
+                logger.info("Saved %s", target)
 
 
 def main() -> None:
     """XGBoost training container entry point."""
     args = parse_args()
 
-    project_id = os.environ.get("CLOUD_ML_PROJECT_ID", "i4g-ml")
-    aiplatform.init(project=project_id, location="us-central1")
+    is_local = not _is_gcs(args.config)
+    if not is_local:
+        project_id = os.environ.get("CLOUD_ML_PROJECT_ID", "i4g-ml")
+        aiplatform.init(project=project_id, location="us-central1")
 
     config = load_config(args.config)
     logger.info("Config loaded: %s", config.get("model_id", "unknown"))
 
     # Load JSONL splits
     for split in ("train", "eval", "test"):
-        download_from_gcs(f"{args.dataset}/{split}.jsonl", f"/tmp/data/{split}.jsonl")
+        _resolve_path(f"{args.dataset}/{split}.jsonl", f"/tmp/data/{split}.jsonl")
 
-    train_data = load_jsonl("/tmp/data/train.jsonl")
-    eval_data = load_jsonl("/tmp/data/eval.jsonl")
+    data_dir = args.dataset if is_local else "/tmp/data"
+    train_data = load_jsonl(f"{data_dir}/train.jsonl")
+    eval_data = load_jsonl(f"{data_dir}/eval.jsonl")
     logger.info("Loaded %d train, %d eval records", len(train_data), len(eval_data))
 
     model_dir = train(config, train_data, eval_data)
 
     output = args.output or f"gs://i4g-ml-data/models/{args.experiment}/"
-    upload_artifacts(model_dir, output)
+    save_artifacts(model_dir, output)
     logger.info("Training complete")
 
 

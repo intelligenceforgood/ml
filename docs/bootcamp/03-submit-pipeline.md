@@ -4,6 +4,10 @@
 > **Prerequisites:** Exercise 2 completed, `gcloud auth application-default login`, access to `i4g-ml` GCP project
 > **Time:** ~45 minutes (including pipeline execution wait)
 
+> **Requires GCP access.** Step 2 (compile) works offline, but submission and monitoring need
+> a live `i4g-ml` project. Without access, complete Steps 1–2, read the remaining steps, then
+> run `conda run -n ml pytest tests/unit/test_submit_pipeline.py -v` to validate the submission logic.
+
 ---
 
 ## Overview

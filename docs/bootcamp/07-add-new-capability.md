@@ -101,6 +101,7 @@ async def classify_spam_route(request: SpamRequest) -> SpamResponse:
 ```
 
 **Important pattern:** Don't modify this file yet — just understand the pattern. The key insight is that each capability follows the same structure:
+
 1. Load model at startup via env var
 2. Add inference function in `predict.py`
 3. Add route in `app.py`
@@ -182,10 +183,10 @@ env {
 
 ## Step 7: Write a unit test
 
-Following the testing pattern in `tests/unit/serving/`:
+Following the testing pattern in `tests/unit/` (all test files are flat in this directory):
 
 ```python
-# tests/unit/serving/test_spam_prediction.py
+# tests/unit/test_spam_prediction.py
 def test_classify_spam_returns_binary_prediction(mock_model):
     """Spam classification returns is_spam boolean."""
     result = classify_spam("Win a free iPhone! Click here now!")

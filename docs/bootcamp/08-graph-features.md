@@ -4,6 +4,10 @@
 > **Prerequisites:** Exercises 1–4 completed, `pip install -e ".[graph]"` (installs `apache-beam` and `networkx`)
 > **Time:** ~30 minutes
 
+> **Partially offline.** Steps 1–4 and 6–7 are code reading (no GCP needed). Step 5’s
+> `DirectRunner` requires a live BigQuery connection; use the unit test fallback instead:
+> `conda run -n ml pytest tests/unit/test_graph_features.py -v`
+
 ---
 
 ## Overview

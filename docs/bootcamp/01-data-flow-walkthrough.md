@@ -4,6 +4,11 @@
 > **Prerequisites:** `conda activate ml`, `pip install -e ".[dev]"`, access to `i4g-ml` GCP project
 > **Time:** ~30 minutes
 
+> **Requires GCP access.** Most steps use `bq` and `gsutil` against live BigQuery/GCS data.
+> Without access, read through the commands and their expected outputs to understand the flow,
+> then run `conda run -n ml pytest tests/unit/test_etl.py tests/unit/test_feature_definitions.py -v`
+> to validate the underlying logic locally.
+
 ---
 
 ## Overview
