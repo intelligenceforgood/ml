@@ -67,8 +67,7 @@ _ANALYST_LABEL_COUNT_QUERY = """
 SELECT COUNT(*) AS cnt
 FROM `{project}.{dataset}.raw_analyst_labels`
 WHERE
-    label_source = 'analyst'
-    AND _ingested_at > @since
+    _ingested_at > @since
 """
 
 _LAST_TRAINING_QUERY = """

@@ -64,19 +64,60 @@ This builds the serving Docker image and pushes it to Artifact Registry.
 
 ---
 
-## Step 4: Deploy via Terraform (recommended) or script
+## Step 4: Point the serving container at your model
 
-The production deployment path uses Terraform to manage the Cloud Run service:
+The Cloud Run `ml-serving` service reads `MODEL_ARTIFACT_URI` on startup. It defaults to
+empty — the server runs in stub mode (returning `model_id: null`) until you set it.
+
+**4a. Find your model artifact GCS path.**
+
+The training pipeline writes artifacts to `gs://i4g-ml-data/models/<experiment_name>/`,
+where `experiment_name` = `<model_id>-<timestamp>`. List recent artifacts:
 
 ```bash
-# Check the current Cloud Run service configuration
-gcloud run services describe ml-serving --project=i4g-ml --region=us-central1 \
-  --format="yaml(spec.template.spec.containers[0].env)" 2>/dev/null || echo "Service not found — deploy via Terraform"
+gsutil ls gs://i4g-ml-data/models/ | tail -5
 ```
+
+Pick the path from your Exercise 3 run. For example:
+`gs://i4g-ml-data/models/classification-xgboost-v1-20260325-2151/`
+
+Verify it contains the expected files (`xgboost_model.json` + `label_map.json`):
+
+```bash
+gsutil ls gs://i4g-ml-data/models/classification-xgboost-v1-20260325-2151/
+```
+
+> **Note:** The training pipeline writes artifacts to GCS regardless of whether the eval
+> gate passed. If `register_model` returned `SKIPPED` in Exercise 3 (check Step 7 of that
+> exercise), the artifacts still exist — you can use them here for serving.
+
+**4b. Update the Cloud Run env var via `gcloud` (quickest for bootcamp):**
+
+```bash
+# Replace the GCS path with your actual artifact URI from 4a
+gcloud run services update ml-serving \
+  --project=i4g-ml --region=us-central1 \
+  --update-env-vars="MODEL_ARTIFACT_URI=gs://i4g-ml-data/models/classification-xgboost-v1-20260325-2151/"
+```
+
+Cloud Run redeploys automatically. The serving container downloads artifacts from GCS on
+startup.
+
+> **Production path:** For production, set `model_artifact_uri` in
+> `infra/environments/ml/terraform.tfvars` and run `terraform apply` instead.
+
+**4c. Verify the model loaded:**
+
+```bash
+curl -s "${SERVICE_URL}/health" \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)" | jq
+```
+
+You should now see `"model_id": "classification-xgboost-v1-20260325-2151"` instead of `null`.
 
 Key environment variables on the Cloud Run service:
 
-- `MODEL_ARTIFACT_URI`: GCS path to the classification model artifact
+- `MODEL_ARTIFACT_URI`: GCS path to the classification model artifact (**must be set**)
 - `NER_MODEL_ARTIFACT_URI`: GCS path to the NER model (empty = disabled)
 - `SHADOW_MODEL_ARTIFACT_URI`: GCS path to shadow model (empty = disabled)
 
@@ -87,43 +128,57 @@ Key environment variables on the Cloud Run service:
 Once the service is deployed, send a test prediction:
 
 ```bash
-# Get the Cloud Run service URL (or use the Vertex AI endpoint)
+# Get the Cloud Run service URL
 SERVICE_URL=$(gcloud run services describe ml-serving --project=i4g-ml \
   --region=us-central1 --format="value(status.url)" 2>/dev/null)
 
 # Send a classification request
+# Note: ml-serving requires an identity token — the service is IAM-protected
 curl -s -X POST "${SERVICE_URL}/predict/classify" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
   -d '{
     "text": "I was contacted on Instagram by someone claiming to be a crypto investment advisor. They asked me to transfer funds via Bitcoin.",
     "case_id": "test-bootcamp-001"
-  }' | python -m json.tool
+  }' | jq
 ```
+
+> **Auth note:** If you get an empty response or `403`, your personal gcloud account may not
+> have `roles/run.invoker` on `ml-serving`. Ask your admin to add the grant, or test locally
+> with `pytest tests/unit/test_serving.py -v` instead.
 
 **Expected response:**
 
 ```json
 {
-  "prediction": {
-    "INTENT": { "label": "INTENT.INVESTMENT", "confidence": 0.87 },
-    "CHANNEL": { "label": "CHANNEL.SOCIAL_MEDIA", "confidence": 0.92 }
-  },
-  "risk_score": 0.85,
-  "model_info": {
-    "model_id": "classification-xgboost-v1",
-    "version": 1,
-    "stage": "champion"
-  },
-  "prediction_id": "pred-abc123..."
+  "predictions": [
+    {
+      "prediction": {
+        "INTENT": { "code": "INTENT.IMPOSTER", "confidence": 0.57 }
+      },
+      "risk_score": null,
+      "model_info": {
+        "model_id": "classification-xgboost-v1-...",
+        "version": 1,
+        "stage": "candidate"
+      },
+      "prediction_id": "93a3d052-..."
+    }
+  ]
 }
 ```
+
+> **Note:** The exact label and confidence will vary based on your model. The single-axis
+> XGBoost model only returns an `INTENT` prediction. `risk_score` is not yet implemented
+> (always `null`). The `stage` is `"candidate"` when loaded directly from GCS.
 
 ---
 
 ## Step 6: Check the health endpoint
 
 ```bash
-curl -s "${SERVICE_URL}/health" | python -m json.tool
+curl -s "${SERVICE_URL}/health" \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)" | jq
 ```
 
 **Expected response:**
@@ -145,14 +200,19 @@ Every prediction is logged to BigQuery for monitoring and feedback:
 
 ```bash
 bq query --use_legacy_sql=false \
-  'SELECT prediction_id, case_id, model_id, is_shadow, created_at
+  'SELECT prediction_id, case_id, model_id, model_version,
+          capability, latency_ms, timestamp
    FROM `i4g-ml.i4g_ml.predictions_prediction_log`
    WHERE case_id = "test-bootcamp-001"
-   ORDER BY created_at DESC
+   ORDER BY timestamp DESC
    LIMIT 5'
 ```
 
-**What to notice:** The prediction appears in the log with the correct `model_id`, `case_id`, and `is_shadow = false`. This logging is what makes monitoring, accuracy tracking, and the feedback loop possible.
+**What to notice:** Your row should show `model_id` matching the artifact directory name
+(e.g., `classification-xgboost-v1-...`), `capability = "classification"`, and a non-zero
+`latency_ms`. If you see `model_id = "stub"` with `latency_ms = 0`, that row came from an
+earlier attempt when no model was loaded — the serving layer falls back to stub predictions
+when `MODEL_ARTIFACT_URI` is empty or model loading fails.
 
 ---
 
@@ -163,12 +223,13 @@ PREDICTION_ID="<prediction_id from step 5>"
 
 curl -s -X POST "${SERVICE_URL}/feedback" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
   -d "{
     \"prediction_id\": \"${PREDICTION_ID}\",
     \"case_id\": \"test-bootcamp-001\",
     \"correction\": {\"INTENT\": \"INTENT.ROMANCE\"},
     \"analyst_id\": \"bootcamp-analyst\"
-  }" | python -m json.tool
+  }" | jq
 ```
 
 Verify the outcome was recorded:

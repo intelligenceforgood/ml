@@ -161,9 +161,9 @@ def _predict_xgboost(text: str, features: dict[str, Any] | None) -> dict[str, di
     feat = features if features else compute_inline_features(text)
     label_map: dict[str, list[str]] = _MODEL_STATE["label_map"]
 
-    # Build feature vector in a stable order
-    feature_keys = sorted(feat.keys())
-    values = [float(feat.get(k, 0)) for k in feature_keys]
+    # Use training feature order if available, else fall back to sorted keys
+    feature_keys = _MODEL_STATE.get("feature_cols") or sorted(feat.keys())
+    values = [float(feat.get(k) or 0) for k in feature_keys]
     dmat = xgb.DMatrix(np.array([values], dtype=np.float32), feature_names=feature_keys)
 
     raw_pred = _MODEL_STATE["booster"].predict(dmat)  # shape depends on objective
@@ -197,7 +197,13 @@ def load_model(artifact_uri: str) -> None:
     global _LOAD_FAILED
 
     _MODEL_STATE["artifact_uri"] = artifact_uri
-    _MODEL_STATE["model_id"] = artifact_uri.rstrip("/").split("/")[-2] if "/" in artifact_uri else "unknown"
+    parts = artifact_uri.rstrip("/").split("/")
+    last = parts[-1] if parts else "unknown"
+    # Two-level path (models/name/vN) → use name; single-level (models/name) → use last
+    if last.startswith("v") and last[1:].isdigit() and len(parts) >= 2:
+        _MODEL_STATE["model_id"] = parts[-2]
+    else:
+        _MODEL_STATE["model_id"] = last if last else "unknown"
 
     # If the URI is empty, stay in stub mode (no model to load)
     if not artifact_uri:
@@ -219,6 +225,11 @@ def load_model(artifact_uri: str) -> None:
             _load_pytorch(dest)
         else:
             _load_xgboost(dest)
+            # Load feature column order used during training
+            feature_cols_path = dest / "feature_cols.json"
+            if feature_cols_path.exists():
+                with open(feature_cols_path) as f:
+                    _MODEL_STATE["feature_cols"] = json.load(f)
 
         # Parse version from URI path (e.g. gs://bucket/models/name/v3/ → 3)
         parts = artifact_uri.rstrip("/").split("/")
@@ -253,7 +264,12 @@ def load_shadow_model(artifact_uri: str) -> None:
         return
 
     _SHADOW_MODEL_STATE["artifact_uri"] = artifact_uri
-    _SHADOW_MODEL_STATE["model_id"] = artifact_uri.rstrip("/").split("/")[-2] if "/" in artifact_uri else "unknown"
+    parts = artifact_uri.rstrip("/").split("/")
+    last = parts[-1] if parts else "unknown"
+    if last.startswith("v") and last[1:].isdigit() and len(parts) >= 2:
+        _SHADOW_MODEL_STATE["model_id"] = parts[-2]
+    else:
+        _SHADOW_MODEL_STATE["model_id"] = last if last else "unknown"
 
     try:
         dest = Path(tempfile.mkdtemp(prefix="ml_shadow_"))
@@ -266,6 +282,10 @@ def load_shadow_model(artifact_uri: str) -> None:
             _load_shadow_pytorch(dest)
         else:
             _load_shadow_xgboost(dest)
+            feature_cols_path = dest / "feature_cols.json"
+            if feature_cols_path.exists():
+                with open(feature_cols_path) as f:
+                    _SHADOW_MODEL_STATE["feature_cols"] = json.load(f)
 
         parts = artifact_uri.rstrip("/").split("/")
         version_str = next(
@@ -498,8 +518,8 @@ def _predict_shadow_xgboost(text: str, features: dict[str, Any] | None) -> dict[
     feat = features if features else compute_inline_features(text)
     label_map: dict[str, list[str]] = _SHADOW_MODEL_STATE["label_map"]
 
-    feature_keys = sorted(feat.keys())
-    values = [float(feat.get(k, 0)) for k in feature_keys]
+    feature_keys = _SHADOW_MODEL_STATE.get("feature_cols") or sorted(feat.keys())
+    values = [float(feat.get(k) or 0) for k in feature_keys]
     dmat = xgb.DMatrix(np.array([values], dtype=np.float32), feature_names=feature_keys)
 
     raw_pred = _SHADOW_MODEL_STATE["booster"].predict(dmat)
@@ -538,7 +558,12 @@ def load_ner_model(artifact_uri: str) -> None:
         return
 
     _NER_MODEL_STATE["artifact_uri"] = artifact_uri
-    _NER_MODEL_STATE["model_id"] = artifact_uri.rstrip("/").split("/")[-2] if "/" in artifact_uri else "ner-unknown"
+    parts = artifact_uri.rstrip("/").split("/")
+    last = parts[-1] if parts else "ner-unknown"
+    if last.startswith("v") and last[1:].isdigit() and len(parts) >= 2:
+        _NER_MODEL_STATE["model_id"] = parts[-2]
+    else:
+        _NER_MODEL_STATE["model_id"] = last if last else "ner-unknown"
 
     try:
         dest = Path(tempfile.mkdtemp(prefix="ml_ner_"))

@@ -38,7 +38,7 @@ head -90 src/ml/training/evaluation.py
 - `EvalResult`: overall metrics + per-axis breakdown
 - `compute_metrics()`: takes predictions and ground truth (both as `[{axis: label_code}]` dicts), computes TP/FP/FN per axis
 
-The key metric is **macro F1** — the average F1 across all axes, equally weighting each axis regardless of support.
+The key metric is **weighted F1** — the average F1 across all axes, weighted by support (number of samples per axis). This gives more influence to axes with more data.
 
 ---
 
@@ -64,16 +64,27 @@ head -80 src/ml/registry/promotion.py
 
 ---
 
-## Step 3: Check the pipeline's eval results
+## Step 3: Check evaluation results
 
-If your pipeline from Exercise 3 completed, check the eval metrics it logged:
+The training pipeline's `evaluate_model` step computes eval metrics and returns them as a
+JSON artifact. To see them, open the **Vertex AI Pipelines** console for your Exercise 3 run
+and click the **evaluate_model** node — the `metrics_json` output contains
+`overall_f1`, `overall_precision`, `overall_recall`, and `per_axis` breakdowns.
+
+> **Note:** The `analytics_model_performance` BigQuery table is populated by the
+> **monitoring** module (`ml.monitoring.accuracy`), not the training pipeline. It tracks
+> accuracy against real analyst outcomes once a model is deployed and receiving predictions.
+> After Exercise 3 alone, this table will be empty.
+
+Once a model is deployed and has received outcomes, you can query it:
 
 ```bash
 bq query --use_legacy_sql=false \
-  'SELECT model_id, overall_f1, overall_precision, overall_recall, computed_at
+  'SELECT model_id, model_version, capability, computed_at, total_predictions,
+          outcomes_received, correct_predictions, accuracy, correction_rate, f1
    FROM `i4g-ml.i4g_ml.analytics_model_performance`
-   ORDER BY computed_at DESC
-   LIMIT 5'
+   ORDER BY computed_at DESC, model_version DESC
+   LIMIT 10'
 ```
 
 ---
@@ -154,7 +165,7 @@ gcloud ai models list --project=i4g-ml --region=us-central1 \
 
 | Concept        | Key insight                                                            |
 | -------------- | ---------------------------------------------------------------------- |
-| Macro F1       | Primary metric — average F1 across axes, equal weight                  |
+| Weighted F1    | Primary metric — average F1 across axes, weighted by support           |
 | Eval gate      | Overall F1 must improve, no axis drops > 5%                            |
 | Promotion path | experimental → candidate → champion                                    |
 | NER eval gate  | Uses entity micro F1 (not macro F1) + per-entity-type regression check |

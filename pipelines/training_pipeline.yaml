@@ -261,14 +261,18 @@ deploymentSpec:
           ],\n            stdout=subprocess.DEVNULL,\n        )\n        import importlib\n\
           \n        xgb = importlib.import_module(\"xgboost\")\n        np = importlib.import_module(\"\
           numpy\")\n\n        booster = xgb.Booster()\n        booster.load_model(str(model_dir\
-          \ / \"xgboost_model.json\"))\n\n        for sample in golden_data:\n   \
-          \         gt_labels = sample.get(\"labels\", {})\n            ground_truth.append(gt_labels)\n\
+          \ / \"xgboost_model.json\"))\n\n        # Use training feature order if\
+          \ available\n        feature_cols_path = model_dir / \"feature_cols.json\"\
+          \n        saved_feature_cols: list[str] | None = None\n        if feature_cols_path.exists():\n\
+          \            with open(feature_cols_path) as fc:\n                saved_feature_cols\
+          \ = json.load(fc)\n\n        for sample in golden_data:\n            gt_labels\
+          \ = sample.get(\"labels\", {})\n            ground_truth.append(gt_labels)\n\
           \n            features = sample.get(\"features\", {})\n            feature_keys\
-          \ = sorted(features.keys())\n            values = [float(features.get(k,\
-          \ 0)) for k in feature_keys]\n            dmat = xgb.DMatrix(np.array([values],\
-          \ dtype=np.float32), feature_names=feature_keys)\n            raw_pred =\
-          \ booster.predict(dmat)\n\n            pred: dict[str, str] = {}\n     \
-          \       offset = 0\n            for axis, labels in label_map.items():\n\
+          \ = saved_feature_cols or sorted(features.keys())\n            values =\
+          \ [float(features.get(k) or 0) for k in feature_keys]\n            dmat\
+          \ = xgb.DMatrix(np.array([values], dtype=np.float32), feature_names=feature_keys)\n\
+          \            raw_pred = booster.predict(dmat)\n\n            pred: dict[str,\
+          \ str] = {}\n            offset = 0\n            for axis, labels in label_map.items():\n\
           \                n = len(labels)\n                axis_probs = raw_pred[0][offset\
           \ : offset + n] if raw_pred.ndim > 1 else raw_pred[offset : offset + n]\n\
           \                best_idx = int(np.argmax(axis_probs))\n               \
@@ -392,8 +396,9 @@ deploymentSpec:
           \n    aiplatform.init(project=project_id, location=region)\n    model =\
           \ aiplatform.Model.upload(\n        display_name=display_name,\n       \
           \ artifact_uri=model_uri,\n        serving_container_image_uri=serving_container_uri,\n\
-          \        labels={\"stage\": \"candidate\", \"capability\": capability},\n\
-          \    )\n    return model.resource_name\n\n"
+          \        serving_container_health_route=\"/health\",\n        serving_container_predict_route=\"\
+          /predict/classify\",\n        labels={\"stage\": \"candidate\", \"capability\"\
+          : capability},\n    )\n    return model.resource_name\n\n"
         image: us-central1-docker.pkg.dev/i4g-ml/containers/pipeline-base:dev
     exec-train-model:
       container:

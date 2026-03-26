@@ -247,13 +247,20 @@ def evaluate_model(
         booster = xgb.Booster()
         booster.load_model(str(model_dir / "xgboost_model.json"))
 
+        # Use training feature order if available
+        feature_cols_path = model_dir / "feature_cols.json"
+        saved_feature_cols: list[str] | None = None
+        if feature_cols_path.exists():
+            with open(feature_cols_path) as fc:
+                saved_feature_cols = json.load(fc)
+
         for sample in golden_data:
             gt_labels = sample.get("labels", {})
             ground_truth.append(gt_labels)
 
             features = sample.get("features", {})
-            feature_keys = sorted(features.keys())
-            values = [float(features.get(k, 0)) for k in feature_keys]
+            feature_keys = saved_feature_cols or sorted(features.keys())
+            values = [float(features.get(k) or 0) for k in feature_keys]
             dmat = xgb.DMatrix(np.array([values], dtype=np.float32), feature_names=feature_keys)
             raw_pred = booster.predict(dmat)
 
@@ -369,6 +376,8 @@ def register_model(
         display_name=display_name,
         artifact_uri=model_uri,
         serving_container_image_uri=serving_container_uri,
+        serving_container_health_route="/health",
+        serving_container_predict_route="/predict/classify",
         labels={"stage": "candidate", "capability": capability},
     )
     return model.resource_name

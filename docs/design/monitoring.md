@@ -70,14 +70,15 @@ ORDER BY override_rate_pct DESC;
 
 ```sql
 SELECT
-  evaluation_date,
-  axis,
-  f1_score,
-  precision_score,
-  recall_score,
-  model_version
+  model_id,
+  model_version,
+  computed_at,
+  f1,
+  accuracy,
+  correction_rate,
+  per_axis_metrics
 FROM `i4g-ml.i4g_ml.analytics_model_performance`
-ORDER BY evaluation_date DESC, axis;
+ORDER BY computed_at DESC, model_version DESC;
 ```
 
 ### Latency Percentiles (last 24h)
@@ -191,8 +192,8 @@ FROM `i4g-ml.i4g_ml.features_case_features`;
 
 | Panel                        | Source                        | Visualization       |
 | ---------------------------- | ----------------------------- | ------------------- |
-| Overall accuracy over time   | `analytics_model_performance` | Line chart (weekly) |
-| Override rate over time      | `analytics_model_performance` | Line chart (weekly) |
+| Overall accuracy over time   | `analytics_model_performance` | Line chart (daily)  |
+| Override rate over time      | `analytics_model_performance` | Line chart (daily)  |
 | Per-axis F1 heatmap          | `analytics_model_performance` | Heatmap / bar chart |
 | Active model versions        | `analytics_model_performance` | Scorecard           |
 | Prediction volume (7d trend) | `predictions_prediction_log`  | Line chart (daily)  |

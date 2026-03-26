@@ -113,6 +113,8 @@ submit-graph-features-dev:
 		--runner DataflowRunner \
 		--temp-location gs://i4g-ml-data/dataflow/temp \
 		--staging-location gs://i4g-ml-data/dataflow/staging \
+		--service-account-email sa-ml-platform@i4g-ml.iam.gserviceaccount.com \
+		--requirements-file containers/graph-features/requirements.txt \
 		--region us-central1
 
 # ---------- Clean ----------

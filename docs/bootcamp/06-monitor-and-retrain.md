@@ -131,9 +131,10 @@ The accuracy pipeline computes model performance from predictions vs. outcomes:
 
 ```bash
 bq query --use_legacy_sql=false \
-  'SELECT model_id, overall_f1, overall_precision, overall_recall, computed_at
+  'SELECT model_id, model_version, capability, computed_at,
+          accuracy, correction_rate, f1
    FROM `i4g-ml.i4g_ml.analytics_model_performance`
-   ORDER BY computed_at DESC
+   ORDER BY computed_at DESC, model_version DESC
    LIMIT 5'
 ```
 

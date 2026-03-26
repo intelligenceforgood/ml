@@ -119,17 +119,45 @@ Wait for the pipeline to complete (typically 10–20 minutes for XGBoost).
 
 ## Step 7: Check the pipeline outputs
 
-After the pipeline completes, verify the model was registered:
+After the pipeline completes, open **Vertex AI Pipelines** in the console and click into
+your pipeline run.
+
+**7a. Check the evaluate_model node.** Click it and inspect the `metrics_json` output.
+You should see `"eval_gate_passed": true` along with `overall_f1`, `per_axis` breakdowns,
+and `total_samples`. If `eval_gate_passed` is `false`, look for an `"error"` field —
+common causes:
+
+- `"Empty golden test set"` — the golden JSONL at
+  `gs://i4g-ml-data/datasets/classification/golden/test.jsonl` has no data
+- `"label_map.json not found in model artifacts"` — the training container
+  didn't write `label_map.json` to the output directory
+- `"Unknown model type in artifacts"` — neither `xgboost_model.json` nor a
+  PyTorch `model/` dir was found at the artifact path
+
+**7b. Check the register_model node.** If `eval_gate_passed` was `false`, this step
+returns `"SKIPPED"` silently — the pipeline still shows as succeeded, but no model
+was registered. You can verify:
 
 ```bash
 gcloud ai models list --project=i4g-ml --region=us-central1 --limit=3
 ```
 
-Check the training dataset registry for the dataset version used:
+If your model doesn't appear, the eval gate blocked registration. Fix the underlying
+issue (missing golden data or artifacts) and resubmit.
+
+**7c. Confirm model artifacts in GCS** regardless of registration status:
+
+```bash
+# The pipeline writes artifacts to gs://i4g-ml-data/models/<experiment_name>/
+# experiment_name = <model_id>-<timestamp>, e.g. classification-xgboost-v1-20260325-2151
+gsutil ls gs://i4g-ml-data/models/ | tail -5
+```
+
+**7d. Check the training dataset registry** for the dataset version used:
 
 ```bash
 bq query --use_legacy_sql=false \
-  'SELECT dataset_id, capability, version, sample_count, created_at
+  'SELECT dataset_id, capability, version, eval_count, test_count, created_at
    FROM `i4g-ml.i4g_ml.training_dataset_registry`
    ORDER BY created_at DESC
    LIMIT 3'

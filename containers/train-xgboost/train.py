@@ -14,7 +14,6 @@ import argparse
 import json
 import logging
 import os
-import pickle
 from pathlib import Path
 from typing import Any
 
@@ -90,7 +89,8 @@ def prepare_features(records: list[dict], feature_cols: list[str]) -> pd.DataFra
             features = json.loads(features)
         row = {col: features.get(col, 0) for col in feature_cols}
         rows.append(row)
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    return df.apply(pd.to_numeric, errors="coerce").fillna(0)
 
 
 def train(config: dict, train_data: list[dict], eval_data: list[dict]) -> Path:
@@ -148,14 +148,19 @@ def train(config: dict, train_data: list[dict], eval_data: list[dict]) -> Path:
     y_pred = np.argmax(model.predict(deval), axis=1)
     f1 = f1_score(y_eval, y_pred, average="weighted")
     logger.info("Eval weighted F1: %.4f", f1)
-    logger.info("\n%s", classification_report(y_eval, y_pred, target_names=le.classes_))
+    logger.info(
+        "\n%s",
+        classification_report(
+            y_eval, y_pred, labels=list(range(len(le.classes_))), target_names=le.classes_, zero_division=0
+        ),
+    )
 
     # Save
     output_dir = Path("/tmp/model_output")
     output_dir.mkdir(parents=True, exist_ok=True)
-    model.save_model(str(output_dir / "model.json"))
-    with open(output_dir / "label_encoder.pkl", "wb") as f:
-        pickle.dump(le, f)
+    model.save_model(str(output_dir / "xgboost_model.json"))
+    with open(output_dir / "label_map.json", "w") as f:
+        json.dump({first_axis: le.classes_.tolist()}, f)
     with open(output_dir / "feature_cols.json", "w") as f:
         json.dump(feature_cols, f)
     with open(output_dir / "metrics.json", "w") as f:

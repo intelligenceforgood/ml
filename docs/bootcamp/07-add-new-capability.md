@@ -4,6 +4,14 @@
 > **Prerequisites:** Exercises 1–6 completed, understanding of the multi-capability architecture
 > **Time:** ~60 minutes
 
+> [!IMPORTANT]
+> **Read-only exercise.** This exercise is a conceptual walkthrough — do **not** create
+> files, modify code, or apply Terraform changes. The steps below would leave test
+> artifacts across multiple repos (`ml/`, `core/`, `infra/`) that are tedious to clean up.
+>
+> Read each step to understand the multi-capability pattern and the checklist at the end.
+> When you need to add a real capability in the future, use this exercise as your template.
+
 ---
 
 ## Overview

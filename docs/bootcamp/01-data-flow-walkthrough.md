@@ -117,7 +117,7 @@ Check existing dataset versions:
 
 ```bash
 bq query --use_legacy_sql=false \
-  'SELECT dataset_id, capability, version, sample_count, created_at
+  'SELECT dataset_id, capability, version, eval_count, test_count, created_at
    FROM `i4g-ml.i4g_ml.training_dataset_registry`
    ORDER BY created_at DESC
    LIMIT 5'
@@ -138,7 +138,7 @@ gsutil ls gs://i4g-ml-data/datasets/ | head -10
 Download and inspect a few records from a JSONL dataset:
 
 ```bash
-gsutil cat gs://i4g-ml-data/datasets/classification_v1_train.jsonl | head -3 | python -m json.tool
+gsutil cat gs://i4g-ml-data/datasets/classification/v1/train.jsonl | head -3 | jq . || true
 ```
 
 **What to notice:**

@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from ml.config import get_settings
@@ -265,9 +265,8 @@ def materialize_performance(
     bq_client = client or _get_bq_client()
     table = f"{settings.platform.project_id}.{settings.bigquery.dataset_id}.analytics_model_performance"
 
-    # Compute the ISO week start (Monday) for the current period
     now = datetime.now(UTC)
-    week_start = (now - timedelta(days=now.weekday())).strftime("%Y-%m-%d")
+    computed_date = now.strftime("%Y-%m-%d")
 
     rows_to_insert = []
     for m in report.models:
@@ -291,7 +290,7 @@ def materialize_performance(
                 "model_id": m.model_id,
                 "model_version": m.model_version,
                 "capability": "classification",
-                "week": week_start,
+                "computed_at": computed_date,
                 "total_predictions": m.total_predictions,
                 "outcomes_received": m.outcomes_received,
                 "correct_predictions": m.correct_predictions,
@@ -307,7 +306,7 @@ def materialize_performance(
         logger.error("BigQuery insert errors for analytics_model_performance: %s", errors)
         raise RuntimeError(f"Failed to materialize performance: {errors}")
 
-    logger.info("Materialized %d model performance rows for week %s", len(rows_to_insert), week_start)
+    logger.info("Materialized %d model performance rows for %s", len(rows_to_insert), computed_date)
     return len(rows_to_insert)
 
 

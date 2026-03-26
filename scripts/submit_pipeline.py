@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from google.cloud import aiplatform
+from google.cloud import aiplatform, storage
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -71,6 +71,13 @@ def submit_pipeline(
     if config_path:
         with open(config_path) as f:
             config = yaml.safe_load(f)
+
+        # Upload config to GCS so the training container can download it
+        gcs_config_blob = f"configs/{Path(config_path).name}"
+        gcs_client = storage.Client(project=PROJECT)
+        bucket = gcs_client.bucket("i4g-ml-data")
+        bucket.blob(gcs_config_blob).upload_from_filename(config_path)
+        logger.info("Uploaded config to gs://i4g-ml-data/%s", gcs_config_blob)
 
     capability = config.get("capability", "classification")
     model_id = config.get("model_id", "classification-v1")
