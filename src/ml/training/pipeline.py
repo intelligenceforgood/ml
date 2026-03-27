@@ -11,6 +11,12 @@ from typing import NamedTuple
 
 from kfp import dsl
 
+
+class EvalOutputs(NamedTuple):
+    passed: str
+    metrics_json: str
+
+
 # All pipeline component dependencies (kfp, google-cloud-aiplatform,
 # google-cloud-storage) are pre-installed in this image at compatible pinned
 # versions.  Using a shared base image eliminates runtime pip installs and
@@ -103,7 +109,7 @@ def evaluate_model(
     golden_set_uri: str,
     min_overall_f1: float,
     max_per_axis_regression: float,
-) -> NamedTuple("EvalOutputs", [("passed", str), ("metrics_json", str)]):
+) -> EvalOutputs:
     """Evaluate a trained model against the golden test set.
 
     Downloads model artifacts + golden test JSONL from GCS, runs inference
@@ -380,6 +386,8 @@ def register_model(
         serving_container_predict_route="/predict/classify",
         labels={"stage": "candidate", "capability": capability},
     )
+    if model is None:
+        raise RuntimeError("Model.upload() returned None")
     return model.resource_name
 
 
@@ -447,11 +455,11 @@ def training_pipeline(
         region=region,
         container_uri=container_uri,
         config_path=config_path,
-        dataset_gcs_path=prep.output,
+        dataset_gcs_path=prep.output,  # type: ignore[attr-defined]
         experiment_name=experiment_name,
     )
     evaluate = evaluate_model(
-        model_uri=train.output,
+        model_uri=train.output,  # type: ignore[attr-defined]
         golden_set_uri=golden_set_uri,
         min_overall_f1=min_overall_f1,
         max_per_axis_regression=max_per_axis_regression,
@@ -459,7 +467,7 @@ def training_pipeline(
     register = register_model(
         project_id=project_id,
         region=region,
-        model_uri=train.output,
+        model_uri=train.output,  # type: ignore[attr-defined]
         display_name=experiment_name,
         serving_container_uri=serving_container_uri,
         eval_passed=evaluate.outputs["passed"],
@@ -468,7 +476,7 @@ def training_pipeline(
     deploy_model(
         project_id=project_id,
         region=region,
-        model_name=register.output,
+        model_name=register.output,  # type: ignore[attr-defined]
         endpoint_name=endpoint_name,
         machine_type=machine_type,
         min_replicas=min_replicas,
