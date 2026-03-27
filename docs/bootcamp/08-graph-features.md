@@ -6,7 +6,7 @@
 
 > **Partially offline.** Steps 1–4 and 6–7 are code reading (no GCP needed). Step 5’s
 > `DirectRunner` requires a live BigQuery connection; use the unit test fallback instead:
-> `conda run -n ml pytest tests/unit/test_graph_features.py -v`
+> `pytest tests/unit/test_graph_features.py -v`
 
 ---
 
@@ -32,7 +32,7 @@ BigQuery raw_entities → Entity co-occurrence pairs → Per-case aggregation
 ## Step 1: Install graph dependencies
 
 ```bash
-conda run -n ml pip install -e ".[graph]"
+pip install -e ".[graph]"
 ```
 
 This installs `apache-beam[gcp]` and `networkx`.
@@ -97,7 +97,7 @@ The pipeline supports `DirectRunner` for local testing:
 # For fully offline testing, the unit tests mock BigQuery reads.
 
 # If you have GCP access:
-conda run -n ml python -m ml.data.graph_features \
+python -m ml.data.graph_features \
   --project i4g-ml \
   --dataset i4g_ml \
   --runner DirectRunner
@@ -106,7 +106,7 @@ conda run -n ml python -m ml.data.graph_features \
 If you don't have GCP access, run the unit tests instead:
 
 ```bash
-conda run -n ml pytest tests/unit/data/test_graph_features.py -v
+pytest tests/unit/data/test_graph_features.py -v
 ```
 
 ---

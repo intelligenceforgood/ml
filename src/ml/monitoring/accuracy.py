@@ -414,6 +414,165 @@ def compute_shadow_comparison(
 
 
 # ---------------------------------------------------------------------------
+# Champion vs Challenger variant comparison (Sprint 1.3)
+# ---------------------------------------------------------------------------
+
+_VARIANT_QUERY = """
+SELECT
+    p.prediction_id,
+    p.model_id,
+    p.model_version,
+    p.prediction,
+    p.variant,
+    o.correction
+FROM `{project}.{dataset}.{pred_table}` p
+INNER JOIN `{project}.{dataset}.{out_table}` o
+    ON p.prediction_id = o.prediction_id
+WHERE p.timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @lookback_days DAY)
+  AND p.variant IN ('champion', 'challenger')
+  AND p.is_shadow IS NOT TRUE
+"""
+
+
+@dataclass(frozen=True)
+class VariantMetrics:
+    """Accuracy metrics for a single variant (champion or challenger)."""
+
+    variant: str
+    model_id: str
+    total_outcomes: int
+    correct: int
+    accuracy: float
+    override_rate: float
+    f1: float
+    per_axis: dict[str, AxisAccuracy] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class VariantComparison:
+    """Side-by-side comparison of champion vs challenger accuracy."""
+
+    champion: VariantMetrics | None
+    challenger: VariantMetrics | None
+    lookback_days: int
+    computed_at: str
+
+
+def compute_variant_comparison(
+    *,
+    lookback_days: int = 7,
+    client: bigquery.Client | None = None,
+) -> VariantComparison:
+    """Compare champion vs challenger accuracy using analyst corrections.
+
+    Queries prediction_log joined with outcome_log, grouped by variant.
+    """
+    from google.cloud import bigquery as bq
+
+    bq_client = client or _get_bq_client()
+    settings = get_settings()
+
+    query = _VARIANT_QUERY.format(
+        project=settings.platform.project_id,
+        dataset=settings.bigquery.dataset_id,
+        pred_table=settings.bigquery.prediction_log_table,
+        out_table=settings.bigquery.outcome_log_table,
+    )
+
+    job_config = bq.QueryJobConfig(
+        query_parameters=[bq.ScalarQueryParameter("lookback_days", "INT64", lookback_days)],
+    )
+
+    rows = list(bq_client.query(query, job_config=job_config).result())
+    if not rows:
+        return VariantComparison(
+            champion=None,
+            challenger=None,
+            lookback_days=lookback_days,
+            computed_at=datetime.now(UTC).isoformat(),
+        )
+
+    # Group by variant
+    variant_data: dict[str, dict] = {}
+    for row in rows:
+        v = row.variant or "champion"
+        if v not in variant_data:
+            variant_data[v] = {
+                "model_id": row.model_id,
+                "axis_data": {},
+                "total": 0,
+            }
+        vd = variant_data[v]
+        vd["total"] += 1
+
+        prediction = json.loads(row.prediction) if isinstance(row.prediction, str) else row.prediction or {}
+        correction = json.loads(row.correction) if isinstance(row.correction, str) else row.correction or {}
+
+        for axis, corrected_label in correction.items():
+            pred_entry = prediction.get(axis, {})
+            pred_label = pred_entry.get("code") if isinstance(pred_entry, dict) else None
+
+            if axis not in vd["axis_data"]:
+                vd["axis_data"][axis] = ([], [])
+            preds, corrs = vd["axis_data"][axis]
+            preds.append(pred_label)
+            corrs.append(corrected_label)
+
+    def _build_variant_metrics(variant_name: str, data: dict) -> VariantMetrics:
+        per_axis: dict[str, AxisAccuracy] = {}
+        total_correct = 0
+        total_overridden = 0
+        total_outcomes = 0
+
+        for axis, (preds, corrs) in sorted(data["axis_data"].items()):
+            correct, overridden, prec, rec, f1 = _compute_axis_metrics(preds, corrs)
+            total = len(corrs)
+            total_correct += correct
+            total_overridden += overridden
+            total_outcomes += total
+            per_axis[axis] = AxisAccuracy(
+                axis=axis,
+                total=total,
+                correct=correct,
+                overridden=overridden,
+                accuracy=_safe_div(correct, total),
+                override_rate=_safe_div(overridden, total),
+                precision=prec,
+                recall=rec,
+                f1=f1,
+            )
+
+        overall_accuracy = _safe_div(total_correct, total_outcomes)
+        overall_override = _safe_div(total_overridden, total_outcomes)
+        overall_f1 = _safe_div(2 * overall_accuracy * overall_accuracy, overall_accuracy + overall_accuracy)
+
+        return VariantMetrics(
+            variant=variant_name,
+            model_id=data["model_id"],
+            total_outcomes=total_outcomes,
+            correct=total_correct,
+            accuracy=overall_accuracy,
+            override_rate=overall_override,
+            f1=overall_f1,
+            per_axis=per_axis,
+        )
+
+    champion_metrics = (
+        _build_variant_metrics("champion", variant_data["champion"]) if "champion" in variant_data else None
+    )
+    challenger_metrics = (
+        _build_variant_metrics("challenger", variant_data["challenger"]) if "challenger" in variant_data else None
+    )
+
+    return VariantComparison(
+        champion=champion_metrics,
+        challenger=challenger_metrics,
+        lookback_days=lookback_days,
+        computed_at=datetime.now(UTC).isoformat(),
+    )
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point (for Cloud Run Job / Cloud Scheduler)
 # ---------------------------------------------------------------------------
 

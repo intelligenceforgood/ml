@@ -19,6 +19,9 @@ class EvalGateConfig(BaseModel):
 
     min_overall_f1: float = 0.0
     max_per_axis_regression: float = 0.05
+    # Risk scoring eval gate (Sprint 4)
+    max_mse: float | None = None  # Max mean squared error
+    min_spearman: float | None = None  # Min Spearman correlation (e.g. 0.6)
 
 
 class TrainingConfig(BaseModel):

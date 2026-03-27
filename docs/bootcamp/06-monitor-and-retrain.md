@@ -6,7 +6,7 @@
 
 > **Requires GCP access.** Steps use `bq` queries and submit jobs to the live project.
 > Without access, read through the exercise, then run
-> `conda run -n ml pytest tests/unit/test_drift.py tests/unit/test_triggers.py tests/unit/test_trigger_retraining.py -v`
+> `pytest tests/unit/test_drift.py tests/unit/test_triggers.py tests/unit/test_trigger_retraining.py -v`
 > to validate the monitoring logic locally.
 
 ---
@@ -77,8 +77,10 @@ head -60 src/ml/monitoring/triggers.py
 
 ## Step 4: Check the trigger entry point
 
+The retraining trigger is invoked via the CLI:
+
 ```bash
-head -80 scripts/trigger_retraining.py
+i4g-ml retrain trigger --help
 ```
 
 **What to notice:**
@@ -93,7 +95,7 @@ head -80 scripts/trigger_retraining.py
 ## Step 5: Run the trigger manually (dry run)
 
 ```bash
-conda run -n ml python scripts/trigger_retraining.py --capability classification
+i4g-ml retrain trigger --capability classification
 ```
 
 **Expected output:** Structured JSON log with either:
@@ -118,7 +120,7 @@ bq query --use_legacy_sql=false \
 To bypass conditions and force a retrain:
 
 ```bash
-conda run -n ml python scripts/trigger_retraining.py --capability classification --force
+i4g-ml retrain trigger --capability classification --force
 ```
 
 This simulates the monthly forced retraining (Cloud Scheduler runs this on the 1st of each month).

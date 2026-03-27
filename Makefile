@@ -3,8 +3,11 @@
         build-train-ner-dev build-train-ner-prod \
         build-graph-features-dev build-graph-features-prod \
         build-etl-prod build-train-pytorch-prod build-train-xgboost-prod build-serve-prod \
-        build-all-dev deploy-etl-dev rehydrate compile-pipeline run-vizier-sweep \
-        trigger-retrain-dev submit-graph-features-dev
+        build-all-dev deploy-etl-dev deploy-serving-dev redeploy-serving-dev \
+        rehydrate compile-pipeline run-vizier-sweep \
+        trigger-retrain-dev submit-graph-features-dev \
+        run-batch-dev run-batch-prod sync-features-dev smoke-e2e \
+        dataset-bootstrap dataset-create baseline compare-frameworks
 
 # ---------- Setup ----------
 setup: install-dev
@@ -32,6 +35,24 @@ format:
 	black src/ tests/
 	isort src/ tests/
 	ruff check --fix src/ tests/
+
+# ---------- CLI wrappers ----------
+# i4g-ml CLI is the primary interface. These Makefile targets are convenience aliases.
+
+dataset-bootstrap:
+	i4g-ml dataset bootstrap
+
+dataset-create:
+	i4g-ml dataset create --capability $(CAPABILITY)
+
+baseline:
+	i4g-ml eval baseline
+
+compare-frameworks:
+	i4g-ml eval compare-frameworks --xgboost-metrics $(XGB_METRICS) --pytorch-metrics $(PT_METRICS)
+
+smoke-e2e:
+	i4g-ml smoke e2e
 
 # ---------- Docker / Deploy (Dev) ----------
 build-etl-dev:
@@ -68,6 +89,12 @@ deploy-etl-dev: build-etl-dev
 		--max-retries=1 \
 		--task-timeout=1800s
 
+deploy-serving-dev:
+	i4g-ml deploy serving --endpoint serving-dev --image-tag dev
+
+redeploy-serving-dev:
+	i4g-ml deploy redeploy --endpoint serving-dev --image-tag dev
+
 # ---------- Docker / Deploy (Prod) ----------
 build-etl-prod:
 	scripts/build_image.sh etl prod
@@ -88,27 +115,37 @@ deploy-serve-prod: build-serve-prod
 	@echo "Prod serving image built. Deploy via: cd ../infra/environments/ml && terraform apply"
 
 # ---------- Pipeline ----------
+CONFIG ?= pipelines/configs/classification_xgboost.yaml
 compile-pipeline:
-	conda run -n ml python -c "\
-	from ml.training.pipeline import training_pipeline; \
-	from kfp import compiler; \
-	compiler.Compiler().compile(training_pipeline, 'pipelines/training_pipeline.yaml'); \
-	print('Compiled to pipelines/training_pipeline.yaml')"
+	i4g-ml pipeline compile
+
+submit-pipeline:
+	i4g-ml pipeline submit --config $(CONFIG)
 
 # ---------- Vizier ----------
-CONFIG ?= pipelines/configs/classification_xgboost.yaml
 TRIALS ?= 15
 run-vizier-sweep:
-	conda run -n ml python -m ml.training.vizier --config $(CONFIG) --max-trials $(TRIALS)
+	python -m ml.training.vizier --config $(CONFIG) --max-trials $(TRIALS)
 
 # ---------- Retrain Trigger ----------
 CAPABILITY ?= classification
 trigger-retrain-dev:
-	conda run -n ml python scripts/trigger_retraining.py --capability $(CAPABILITY)
+	i4g-ml retrain trigger --capability $(CAPABILITY)
+
+# ---------- Batch Prediction ----------
+run-batch-dev:
+	i4g-ml serve batch --capability $(CAPABILITY)
+
+run-batch-prod:
+	i4g-ml serve batch --capability $(CAPABILITY)
+
+# ---------- Feature Store ----------
+sync-features-dev:
+	python -m ml.data.feature_store --project i4g-ml --feature-store-id i4g_ml_features --entity-type-id case
 
 # ---------- Graph Features ----------
 submit-graph-features-dev:
-	conda run -n ml python -m ml.data.graph_features \
+	python -m ml.data.graph_features \
 		--project i4g-ml --dataset i4g_ml \
 		--runner DataflowRunner \
 		--temp-location gs://i4g-ml-data/dataflow/temp \

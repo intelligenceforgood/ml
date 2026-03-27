@@ -87,6 +87,8 @@ def log_prediction(
     endpoint: str = "",
     is_shadow: bool = False,
     capability: str = "classification",
+    variant: str = "champion",
+    routing_reason: str = "",
 ) -> None:
     """Log a prediction to BigQuery ``predictions_prediction_log``."""
     try:
@@ -105,6 +107,8 @@ def log_prediction(
             "latency_ms": latency_ms,
             "is_shadow": is_shadow,
             "capability": capability,
+            "variant": variant,
+            "routing_reason": routing_reason,
             "timestamp": datetime.now(UTC).isoformat(),
         }
         _insert_with_retry(table, row, context=f"prediction:{prediction_id}")

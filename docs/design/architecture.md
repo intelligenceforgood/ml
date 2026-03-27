@@ -201,7 +201,7 @@ Dataflow job.
 **Local development:**
 
 ```bash
-conda run -n ml python -m ml.data.graph_features --runner DirectRunner
+python -m ml.data.graph_features --runner DirectRunner
 ```
 
 **Source:** `src/ml/data/graph_features.py`
@@ -258,4 +258,4 @@ when XGBoost plateaus and the accuracy gap justifies the GPU cost. Both framewor
 label schema, eval gate thresholds, and promotion criteria — so they are interchangeable in the
 pipeline.
 
-Use `scripts/compare_frameworks.py` to compare evaluation metrics side-by-side.
+Use `i4g-ml eval compare-frameworks` to compare evaluation metrics side-by-side.

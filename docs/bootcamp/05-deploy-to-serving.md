@@ -5,7 +5,7 @@
 > **Time:** ~25 minutes
 
 > **Requires GCP access.** All steps interact with Cloud Run and BigQuery. Without access,
-> read through the exercise, then run `conda run -n ml pytest tests/unit/test_serving.py -v`
+> read through the exercise, then run `pytest tests/unit/test_serving.py -v`
 > to validate the serving logic locally.
 
 ---
@@ -40,10 +40,10 @@ head -80 src/ml/serving/predict.py
 
 ---
 
-## Step 2: Examine the deployment script
+## Step 2: Examine the deployment logic
 
 ```bash
-head -60 scripts/deploy_serving.py
+head -60 src/ml/cli/deploy.py
 ```
 
 **What to notice:**

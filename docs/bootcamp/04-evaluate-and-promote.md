@@ -6,7 +6,7 @@
 
 > **Partially offline.** Steps 4–5 (manual eval and gate simulation) run entirely in a local
 > Python shell — no GCP needed. Steps 3 and 6 use `bq` and `gcloud` against live data.
-> Run `conda run -n ml pytest tests/unit/test_evaluation.py -v` to validate eval logic locally.
+> Run `pytest tests/unit/test_evaluation.py -v` to validate eval logic locally.
 
 ---
 
@@ -94,7 +94,7 @@ bq query --use_legacy_sql=false \
 You can also run evaluation outside the pipeline. This is useful for debugging:
 
 ```python
-# In a Python shell (conda run -n ml python)
+# In a Python shell (python)
 from ml.training.evaluation import compute_metrics
 
 predictions = [

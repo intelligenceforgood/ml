@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import uuid
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -17,12 +18,18 @@ from ml.serving.predict import (
     classify_text,
     classify_text_shadow,
     extract_entities,
+    is_challenger_ready,
     is_ner_ready,
+    is_risk_ready,
     is_shadow_ready,
+    load_challenger_model,
     load_model,
     load_ner_model,
+    load_risk_model,
     load_shadow_model,
+    predict_risk_score,
 )
+from ml.serving.routing import load_traffic_config, route_prediction_cost_aware
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +76,9 @@ class HealthResponse(BaseModel):
     status: str = "healthy"
     model_id: str | None = None
     shadow_active: bool = False
+    challenger_active: bool = False
     ner_active: bool = False
+    risk_active: bool = False
 
 
 class ExtractEntitiesRequest(BaseModel):
@@ -89,6 +98,37 @@ class ExtractEntitiesResponse(BaseModel):
     prediction_id: str
     entities: list[EntitySpanResponse]
     model_info: ModelInfo
+
+
+class RiskScoreRequest(BaseModel):
+    text: str
+    case_id: str
+    features: dict | None = None
+
+
+class RiskScoreResponse(BaseModel):
+    case_id: str
+    risk_score: float
+    model_info: ModelInfo
+    prediction_id: str
+
+
+class SimilarCasesRequest(BaseModel):
+    text: str
+    case_id: str
+    k: int = 10
+
+
+class SimilarCaseResult(BaseModel):
+    case_id: str
+    distance: float
+    score: float
+
+
+class SimilarCasesResponse(BaseModel):
+    case_id: str
+    similar_cases: list[SimilarCaseResult]
+    prediction_id: str
 
 
 # ---------------------------------------------------------------------------
@@ -113,12 +153,36 @@ async def startup_event() -> None:
     else:
         logger.info("SHADOW_MODEL_ARTIFACT_URI not set — shadow mode disabled")
 
+    challenger_uri = os.environ.get("CHALLENGER_MODEL_ARTIFACT_URI", "")
+    if challenger_uri:
+        load_challenger_model(challenger_uri)
+        logger.info("Challenger model loaded from %s", challenger_uri)
+    else:
+        logger.info("CHALLENGER_MODEL_ARTIFACT_URI not set — challenger routing disabled")
+
     ner_uri = os.environ.get("NER_MODEL_ARTIFACT_URI", "")
     if ner_uri:
         load_ner_model(ner_uri)
         logger.info("NER model loaded from %s", ner_uri)
     else:
         logger.info("NER_MODEL_ARTIFACT_URI not set — NER serving disabled")
+
+    risk_uri = os.environ.get("RISK_MODEL_ARTIFACT_URI", "")
+    if risk_uri:
+        load_risk_model(risk_uri)
+        logger.info("Risk scoring model loaded from %s", risk_uri)
+    else:
+        logger.info("RISK_MODEL_ARTIFACT_URI not set — risk scoring disabled")
+
+    # Initialize similarity index if embeddings are available
+    if os.environ.get("SIMILARITY_ENABLED", "").lower() == "true":
+        try:
+            from ml.serving.similarity import rebuild_index_from_bq
+
+            rebuild_index_from_bq()
+            logger.info("Similarity index initialized")
+        except Exception:  # noqa: BLE001 — non-critical
+            logger.warning("Failed to initialize similarity index", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +200,9 @@ async def health() -> HealthResponse:
         status=status,
         model_id=_MODEL_STATE.get("model_id"),
         shadow_active=is_shadow_ready(),
+        challenger_active=is_challenger_ready(),
         ner_active=is_ner_ready(),
+        risk_active=is_risk_ready(),
     )
 
 
@@ -151,11 +217,23 @@ async def predict_classify(request: Request) -> dict[str, Any]:
 
     instances = body.get("instances", [body])
 
+    # Load routing config once per request batch
+    traffic_config = load_traffic_config()
+
     predictions = []
     for instance in instances:
         req = ClassifyRequest(**instance)
+
+        # Route to champion or challenger
+        routing = route_prediction_cost_aware(
+            req.case_id,
+            capability="classification",
+            challenger_ready=is_challenger_ready(),
+            traffic_config=traffic_config,
+        )
+
         try:
-            result = classify_text(req.text, req.case_id, features=req.features)
+            result = classify_text(req.text, req.case_id, features=req.features, variant=routing.variant)
         except Exception as exc:  # noqa: BLE001 — return HTTP 500 for any prediction error
             logger.exception("Prediction failed for case %s", req.case_id)
             raise HTTPException(status_code=500, detail="Prediction failed") from exc
@@ -168,6 +246,8 @@ async def predict_classify(request: Request) -> dict[str, Any]:
             prediction=result["prediction"],
             features=req.features,
             latency_ms=result.get("latency_ms", 0),
+            variant=result.get("variant", "champion"),
+            routing_reason=routing.routing_reason,
         )
 
         # Fire shadow inference asynchronously — never blocks champion response
@@ -256,3 +336,82 @@ async def feedback(req: FeedbackRequest) -> FeedbackResponse:
         analyst_id=req.analyst_id,
     )
     return FeedbackResponse(outcome_id=outcome_id)
+
+
+# ---------------------------------------------------------------------------
+# Risk Scoring (Sprint 4)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/predict/risk-score", response_model=RiskScoreResponse)
+async def predict_risk(req: RiskScoreRequest) -> RiskScoreResponse:
+    """Compute a fraud risk score for a case."""
+    if not is_risk_ready():
+        raise HTTPException(status_code=503, detail="Risk scoring model not loaded")
+
+    prediction_id = str(uuid.uuid4())
+    try:
+        score = predict_risk_score(req.text, req.features)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Risk scoring failed for case %s", req.case_id)
+        raise HTTPException(status_code=500, detail="Risk scoring failed") from exc
+
+    from ml.serving.predict import _RISK_MODEL_STATE
+
+    model_info = ModelInfo(
+        model_id=_RISK_MODEL_STATE.get("model_id", "risk-stub"),
+        version=_RISK_MODEL_STATE.get("version", 0),
+        stage=_RISK_MODEL_STATE.get("stage", "experimental"),
+    )
+
+    log_prediction(
+        prediction_id=prediction_id,
+        case_id=req.case_id,
+        model_id=model_info.model_id,
+        model_version=model_info.version,
+        prediction={"risk_score": score},
+        features=req.features,
+        capability="risk_scoring",
+    )
+
+    return RiskScoreResponse(
+        case_id=req.case_id,
+        risk_score=score,
+        model_info=model_info,
+        prediction_id=prediction_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Document Similarity (Sprint 5)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/predict/similar-cases", response_model=SimilarCasesResponse)
+async def predict_similar_cases(req: SimilarCasesRequest) -> SimilarCasesResponse:
+    """Find cases similar to the input text using embedding similarity."""
+    import numpy as np
+
+    prediction_id = str(uuid.uuid4())
+
+    try:
+        from ml.serving.embeddings import compute_embedding
+        from ml.serving.similarity import get_similarity_index
+
+        idx = get_similarity_index()
+        if idx.size == 0:
+            raise HTTPException(status_code=503, detail="Similarity index not built")
+
+        embedding = compute_embedding(req.text)
+        results = idx.search(np.array(embedding, dtype=np.float32), k=req.k)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Similarity search failed for case %s", req.case_id)
+        raise HTTPException(status_code=500, detail="Similarity search failed") from exc
+
+    return SimilarCasesResponse(
+        case_id=req.case_id,
+        similar_cases=[SimilarCaseResult(case_id=r.case_id, distance=r.distance, score=r.score) for r in results],
+        prediction_id=prediction_id,
+    )

@@ -341,3 +341,92 @@ def evaluate_ner(
         per_entity_type=per_entity,
         total_samples=len(predictions),
     )
+
+
+# ---------------------------------------------------------------------------
+# Regression evaluation (Sprint 4 — Risk Scoring)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RegressionResult:
+    """Evaluation result for a regression model (e.g. risk scoring)."""
+
+    mse: float
+    mae: float
+    rmse: float
+    spearman_rho: float
+    total_samples: int
+
+    def summary(self) -> str:
+        """Human-readable summary."""
+        return (
+            f"MSE={self.mse:.4f}  MAE={self.mae:.4f}  RMSE={self.rmse:.4f}  "
+            f"Spearman={self.spearman_rho:.4f}  (n={self.total_samples})"
+        )
+
+
+def evaluate_regression(
+    predictions: list[float],
+    ground_truth: list[float],
+) -> RegressionResult:
+    """Compute regression metrics for risk scoring evaluation.
+
+    Args:
+        predictions: Predicted continuous values (0.0–1.0).
+        ground_truth: True continuous values (0.0–1.0).
+
+    Returns:
+        RegressionResult with MSE, MAE, RMSE, and Spearman correlation.
+    """
+    if len(predictions) != len(ground_truth):
+        raise ValueError(f"Length mismatch: {len(predictions)} predictions vs {len(ground_truth)} ground truth")
+    if not predictions:
+        return RegressionResult(mse=0.0, mae=0.0, rmse=0.0, spearman_rho=0.0, total_samples=0)
+
+    n = len(predictions)
+    errors = [p - g for p, g in zip(predictions, ground_truth, strict=False)]
+    sq_errors = [e * e for e in errors]
+    abs_errors = [abs(e) for e in errors]
+
+    mse = sum(sq_errors) / n
+    mae = sum(abs_errors) / n
+    rmse = mse**0.5
+
+    # Spearman rank correlation
+    spearman_rho = _spearman(predictions, ground_truth)
+
+    return RegressionResult(
+        mse=mse,
+        mae=mae,
+        rmse=rmse,
+        spearman_rho=spearman_rho,
+        total_samples=n,
+    )
+
+
+def _spearman(x: list[float], y: list[float]) -> float:
+    """Compute Spearman rank correlation coefficient."""
+    n = len(x)
+    if n < 2:
+        return 0.0
+
+    def _rank(vals: list[float]) -> list[float]:
+        indexed = sorted(enumerate(vals), key=lambda t: t[1])
+        ranks = [0.0] * n
+        i = 0
+        while i < n:
+            j = i
+            while j < n - 1 and indexed[j + 1][1] == indexed[j][1]:
+                j += 1
+            avg_rank = (i + j) / 2.0 + 1.0  # 1-indexed
+            for k in range(i, j + 1):
+                ranks[indexed[k][0]] = avg_rank
+            i = j + 1
+        return ranks
+
+    rx = _rank(x)
+    ry = _rank(y)
+
+    d_sq = sum((a - b) ** 2 for a, b in zip(rx, ry, strict=False))
+    return 1.0 - (6.0 * d_sq) / (n * (n * n - 1))

@@ -1,7 +1,7 @@
 # Exercise 2: Train a Model Locally
 
 > **Objective:** Run the XGBoost training container on a sample dataset and produce a model artifact.
-> **Prerequisites:** Exercise 1 completed, `conda activate ml`, Docker installed
+> **Prerequisites:** Exercise 1 completed, conda env `ml` activated, Docker installed
 > **Time:** ~30 minutes
 
 ---

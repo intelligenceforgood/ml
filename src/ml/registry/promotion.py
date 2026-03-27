@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from google.cloud import aiplatform
 
 from ml.config import get_settings
-from ml.training.evaluation import EvalResult, NerEvalResult
+from ml.training.evaluation import EvalResult, NerEvalResult, RegressionResult
 
 logger = logging.getLogger(__name__)
 
@@ -85,10 +85,41 @@ def _passes_ner_eval_gate(
     return True, "NER eval gate passed"
 
 
+def _passes_risk_scoring_eval_gate(
+    candidate: RegressionResult,
+    champion: RegressionResult | None,
+    *,
+    max_mse_regression: float = 0.01,
+    min_spearman: float = 0.6,
+) -> tuple[bool, str]:
+    """Check if a risk scoring candidate passes the eval gate.
+
+    Risk scoring uses MSE as the primary metric and Spearman rank correlation
+    as a secondary quality check.
+    """
+    if champion is None:
+        if candidate.spearman_rho < min_spearman:
+            return False, (f"First model Spearman ({candidate.spearman_rho:.4f}) < minimum ({min_spearman:.4f})")
+        return True, "No existing risk scoring champion — first model passes"
+
+    # MSE must not regress beyond threshold
+    if candidate.mse > champion.mse + max_mse_regression:
+        return False, (
+            f"Candidate MSE ({candidate.mse:.4f}) > champion ({champion.mse:.4f}) + "
+            f"tolerance ({max_mse_regression:.4f})"
+        )
+
+    # Spearman correlation must remain above minimum
+    if candidate.spearman_rho < min_spearman:
+        return False, (f"Candidate Spearman ({candidate.spearman_rho:.4f}) < minimum ({min_spearman:.4f})")
+
+    return True, "Risk scoring eval gate passed"
+
+
 def promote_model(
     model_name: str,
-    candidate_metrics: EvalResult | NerEvalResult,
-    champion_metrics: EvalResult | NerEvalResult | None = None,
+    candidate_metrics: EvalResult | NerEvalResult | RegressionResult,
+    champion_metrics: EvalResult | NerEvalResult | RegressionResult | None = None,
     *,
     capability: str = "classification",
     target_stage: str = "candidate",
@@ -107,6 +138,11 @@ def promote_model(
                 candidate_metrics,  # type: ignore[arg-type]
                 champion_metrics,  # type: ignore[arg-type]
                 max_regression=max_regression,
+            )
+        elif capability == "risk_scoring":
+            passed, reason = _passes_risk_scoring_eval_gate(
+                candidate_metrics,  # type: ignore[arg-type]
+                champion_metrics,  # type: ignore[arg-type]
             )
         else:
             passed, reason = _passes_eval_gate(

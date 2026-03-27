@@ -6,7 +6,7 @@
 
 > **Requires GCP access.** Step 2 (compile) works offline, but submission and monitoring need
 > a live `i4g-ml` project. Without access, complete Steps 1–2, read the remaining steps, then
-> run `conda run -n ml pytest tests/unit/test_submit_pipeline.py -v` to validate the submission logic.
+> run `pytest tests/unit/test_submit_pipeline.py -v` to validate the submission logic.
 
 ---
 
@@ -42,7 +42,7 @@ head -80 src/ml/training/pipeline.py
 The pipeline Python definition must be compiled to a YAML file before submission:
 
 ```bash
-conda run -n ml make compile-pipeline
+make compile-pipeline
 ```
 
 Verify the compiled output:
@@ -56,10 +56,10 @@ head -20 pipelines/training_pipeline.yaml
 
 ---
 
-## Step 3: Understand the submission script
+## Step 3: Understand the submission logic
 
 ```bash
-head -80 scripts/submit_pipeline.py
+head -80 src/ml/cli/pipeline.py
 ```
 
 **What to notice:**
@@ -84,7 +84,7 @@ This YAML configures the pipeline run: which framework, hyperparameters, eval me
 ## Step 5: Submit the pipeline
 
 ```bash
-conda run -n ml python scripts/submit_pipeline.py \
+i4g-ml pipeline submit \
   --config pipelines/configs/classification_xgboost.yaml
 ```
 
@@ -171,7 +171,7 @@ bq query --use_legacy_sql=false \
 | ------------------------ | ---------------------------- | ---------------------------------- |
 | Read pipeline definition | Understood the KFP DAG       | `training/pipeline.py`             |
 | Compiled pipeline        | Generated YAML from Python   | `pipelines/training_pipeline.yaml` |
-| Submitted pipeline       | Sent job to Vertex AI        | `scripts/submit_pipeline.py`       |
+| Submitted pipeline       | Sent job to Vertex AI        | `i4g-ml pipeline submit`           |
 | Monitored execution      | Tracked steps in console     | Vertex AI Pipelines UI             |
 | Verified outputs         | Confirmed model registration | Model Registry + BigQuery          |
 

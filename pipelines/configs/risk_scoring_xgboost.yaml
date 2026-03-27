@@ -1,0 +1,47 @@
+# Risk scoring training config — XGBoost regression
+# Predicts a continuous 0.0–1.0 risk score for each case.
+#
+# Uses pre-computed BigQuery features (case features + graph features).
+# Trained on analyst-labeled risk levels mapped to continuous scores.
+
+model_id: "risk-scoring-xgboost-v1"
+capability: "risk_scoring"
+base_model: "xgboost"
+framework: "xgboost"
+training_type: "full"
+
+hyperparameters:
+  epochs: 200 # XGBoost num_boost_round
+  batch_size: 0
+  learning_rate: 0.05
+  warmup_ratio: 0.0
+
+xgboost_params:
+  max_depth: 5
+  subsample: 0.8
+  colsample_bytree: 0.8
+  min_child_weight: 3
+  objective: "reg:squarederror"
+  eval_metric: "rmse"
+  early_stopping_rounds: 15
+
+# Risk scoring is continuous — no label_schema. Use risk_levels for
+# analyst-labeled bucketing during dataset preparation.
+label_schema: {}
+
+risk_levels:
+  low: 0.2
+  medium: 0.5
+  high: 0.8
+  critical: 1.0
+
+eval_gate:
+  min_overall_f1: 0.0
+  max_per_axis_regression: 0.05
+  max_mse: 0.05
+  min_spearman: 0.6
+
+resources:
+  machine_type: "n1-standard-4"
+  gpu_type: ""
+  gpu_count: 0

@@ -32,7 +32,7 @@ Two Cloud Scheduler triggers run automatically:
 make trigger-retrain-dev
 
 # Force retraining regardless of conditions
-conda run -n ml python scripts/trigger_retraining.py --capability classification --force
+i4g-ml retrain trigger --capability classification --force
 ```
 
 ## E2E Test Procedure (Dev)
@@ -53,7 +53,7 @@ conda run -n ml python scripts/trigger_retraining.py --capability classification
 2. **Run drift materialization** to populate drift metrics:
 
    ```bash
-   conda run -n ml python -m ml.monitoring.drift --model-id classification-v1 --window-days 7
+   python -m ml.monitoring.drift --model-id classification-v1 --window-days 7
    ```
 
 3. **Run retrain trigger** manually:

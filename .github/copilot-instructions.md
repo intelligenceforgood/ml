@@ -6,9 +6,9 @@ repo-specific context.
 
 ## Environment
 
-- **Conda env:** `ml`
+- **Conda env:** `ml` — all commands assume this env is active (`conda activate ml`)
 - **Language:** Python 3.11+ (FastAPI, Pydantic v2, KFP v2, Google Cloud SDKs)
-- **All commands prefix:** `conda run -n ml ...`
+- **CLI:** `i4g-ml` (Typer) — primary developer interface
 
 ## Build & Test
 
@@ -46,5 +46,5 @@ black --check src/ tests/                 # format check
 ## Pre-Commit
 
 ```bash
-conda run -n ml pre-commit run --all-files
+pre-commit run --all-files
 ```

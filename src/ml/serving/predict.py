@@ -24,10 +24,14 @@ logger = logging.getLogger(__name__)
 
 _MODEL_STATE: dict[str, Any] = {}
 _SHADOW_MODEL_STATE: dict[str, Any] = {}
+_CHALLENGER_MODEL_STATE: dict[str, Any] = {}
+_RISK_MODEL_STATE: dict[str, Any] = {}
 
 # Sentinel for "model load was attempted but failed"
 _LOAD_FAILED = False
 _SHADOW_LOAD_FAILED = False
+_CHALLENGER_LOAD_FAILED = False
+_RISK_LOAD_FAILED = False
 
 
 # ---------------------------------------------------------------------------
@@ -400,24 +404,40 @@ def classify_text(
     case_id: str,
     *,
     features: dict | None = None,
+    variant: str = "champion",
 ) -> dict[str, Any]:
     """Run classification on input text. Returns prediction dict.
 
     Falls back to stub predictions if no model is loaded.
     Raises ``RuntimeError`` if model load was attempted but failed.
+
+    Args:
+        text: Input text to classify.
+        case_id: Case identifier.
+        features: Pre-computed features (optional).
+        variant: Which model to use: "champion" or "challenger".
     """
     start = time.perf_counter()
     prediction_id = str(uuid.uuid4())
 
-    framework = _MODEL_STATE.get("framework")
+    # Select model state based on variant
+    if variant == "challenger" and is_challenger_ready():
+        model_state = _CHALLENGER_MODEL_STATE
+    else:
+        model_state = _MODEL_STATE
+        variant = "champion"
 
-    if _LOAD_FAILED:
+    framework = model_state.get("framework")
+
+    if variant == "champion" and _LOAD_FAILED:
         raise RuntimeError("Model failed to load — serving unavailable")
+    if variant == "challenger" and _CHALLENGER_LOAD_FAILED:
+        raise RuntimeError("Challenger model failed to load")
 
     if framework == "pytorch":
-        prediction = _predict_pytorch(text)
+        prediction = _predict_with_state(model_state, text, features, framework="pytorch")
     elif framework == "xgboost":
-        prediction = _predict_xgboost(text, features)
+        prediction = _predict_with_state(model_state, text, features, framework="xgboost")
     else:
         # No model loaded — stub mode
         prediction = {
@@ -432,12 +452,75 @@ def classify_text(
         "prediction": prediction,
         "risk_score": None,
         "model_info": {
-            "model_id": _MODEL_STATE.get("model_id", "stub"),
-            "version": _MODEL_STATE.get("version", 0),
-            "stage": _MODEL_STATE.get("stage", "experimental"),
+            "model_id": model_state.get("model_id", "stub"),
+            "version": model_state.get("version", 0),
+            "stage": model_state.get("stage", "experimental"),
         },
+        "variant": variant,
         "latency_ms": elapsed_ms,
     }
+
+
+def _predict_with_state(
+    state: dict[str, Any],
+    text: str,
+    features: dict[str, Any] | None,
+    *,
+    framework: str,
+) -> dict[str, dict[str, Any]]:
+    """Run inference using the given model state dict."""
+    if framework == "pytorch":
+        import torch
+
+        tokenizer = state["tokenizer"]
+        model = state["model"]
+        label_map: dict[str, list[str]] = state["label_map"]
+
+        inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+        with torch.no_grad():
+            logits = model(**inputs).logits
+
+        probs = torch.softmax(logits, dim=-1).squeeze(0)
+
+        result: dict[str, dict[str, Any]] = {}
+        offset = 0
+        for axis, labels in label_map.items():
+            n = len(labels)
+            axis_probs = probs[offset : offset + n]
+            best_idx = int(torch.argmax(axis_probs).item())
+            result[axis] = {
+                "code": labels[best_idx],
+                "confidence": round(float(axis_probs[best_idx].item()), 4),
+            }
+            offset += n
+        return result
+    else:
+        import numpy as np
+        import xgboost as xgb
+
+        from ml.serving.features import compute_inline_features
+
+        feat = features if features else compute_inline_features(text)
+        label_map_xgb: dict[str, list[str]] = state["label_map"]
+
+        feature_keys = state.get("feature_cols") or sorted(feat.keys())
+        values = [float(feat.get(k) or 0) for k in feature_keys]
+        dmat = xgb.DMatrix(np.array([values], dtype=np.float32), feature_names=feature_keys)
+
+        raw_pred = state["booster"].predict(dmat)
+
+        result_xgb: dict[str, dict[str, Any]] = {}
+        offset = 0
+        for axis, labels in label_map_xgb.items():
+            n = len(labels)
+            axis_probs = raw_pred[0][offset : offset + n] if raw_pred.ndim > 1 else raw_pred[offset : offset + n]
+            best_idx = int(np.argmax(axis_probs))
+            result_xgb[axis] = {
+                "code": labels[best_idx],
+                "confidence": round(float(axis_probs[best_idx]), 4),
+            }
+            offset += n
+        return result_xgb
 
 
 def classify_text_shadow(
@@ -537,6 +620,172 @@ def _predict_shadow_xgboost(text: str, features: dict[str, Any] | None) -> dict[
         offset += n
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Challenger model loading
+# ---------------------------------------------------------------------------
+
+
+def load_challenger_model(artifact_uri: str) -> None:
+    """Load challenger model artifacts for A/B routing.
+
+    The challenger model receives a fraction of live traffic and its results
+    ARE returned to users (unlike shadow, which is silent).
+    """
+    global _CHALLENGER_LOAD_FAILED
+
+    if not artifact_uri:
+        return
+
+    _CHALLENGER_MODEL_STATE["artifact_uri"] = artifact_uri
+    parts = artifact_uri.rstrip("/").split("/")
+    last = parts[-1] if parts else "unknown"
+    if last.startswith("v") and last[1:].isdigit() and len(parts) >= 2:
+        _CHALLENGER_MODEL_STATE["model_id"] = parts[-2]
+    else:
+        _CHALLENGER_MODEL_STATE["model_id"] = last if last else "unknown"
+
+    try:
+        dest = Path(tempfile.mkdtemp(prefix="ml_challenger_"))
+        _download_artifacts(artifact_uri, dest)
+
+        _CHALLENGER_MODEL_STATE["label_map"] = _load_label_map(dest)
+
+        model_type = _detect_model_type(dest)
+        if model_type == "pytorch":
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+            model_dir = dest / "model" if (dest / "model").is_dir() else dest
+            tokenizer = AutoTokenizer.from_pretrained(str(model_dir))
+            model = AutoModelForSequenceClassification.from_pretrained(str(model_dir))
+            model.eval()
+            _CHALLENGER_MODEL_STATE["tokenizer"] = tokenizer
+            _CHALLENGER_MODEL_STATE["model"] = model
+            _CHALLENGER_MODEL_STATE["framework"] = "pytorch"
+        else:
+            import xgboost as xgb
+
+            booster = xgb.Booster()
+            booster.load_model(str(dest / "xgboost_model.json"))
+            _CHALLENGER_MODEL_STATE["booster"] = booster
+            _CHALLENGER_MODEL_STATE["framework"] = "xgboost"
+            feature_cols_path = dest / "feature_cols.json"
+            if feature_cols_path.exists():
+                with open(feature_cols_path) as f:
+                    _CHALLENGER_MODEL_STATE["feature_cols"] = json.load(f)
+
+        parts = artifact_uri.rstrip("/").split("/")
+        version_str = next(
+            (p for p in reversed(parts) if p.startswith("v") and p[1:].isdigit()),
+            "v1",
+        )
+        _CHALLENGER_MODEL_STATE["version"] = int(version_str[1:])
+        _CHALLENGER_MODEL_STATE["stage"] = "challenger"
+        _CHALLENGER_LOAD_FAILED = False
+        _check_memory_guard()
+        logger.info("Challenger model loaded: type=%s, uri=%s", model_type, artifact_uri)
+
+    except Exception:  # noqa: BLE001 — catch-all for model loading
+        _CHALLENGER_LOAD_FAILED = True
+        _CHALLENGER_MODEL_STATE["version"] = 0
+        _CHALLENGER_MODEL_STATE["stage"] = "error"
+        logger.exception("Failed to load challenger model from %s", artifact_uri)
+
+
+def is_challenger_ready() -> bool:
+    """Return True if a challenger model is loaded and ready."""
+    return not _CHALLENGER_LOAD_FAILED and _CHALLENGER_MODEL_STATE.get("framework") is not None
+
+
+# ---------------------------------------------------------------------------
+# Risk Scoring Model (Sprint 4)
+# ---------------------------------------------------------------------------
+
+
+def load_risk_model(artifact_uri: str) -> None:
+    """Load risk scoring model artifacts from GCS.
+
+    Risk scoring uses XGBoost regression to produce a continuous 0.0–1.0 score.
+    """
+    global _RISK_LOAD_FAILED
+
+    if not artifact_uri:
+        return
+
+    _RISK_MODEL_STATE["artifact_uri"] = artifact_uri
+    parts = artifact_uri.rstrip("/").split("/")
+    last = parts[-1] if parts else "risk-unknown"
+    if last.startswith("v") and last[1:].isdigit() and len(parts) >= 2:
+        _RISK_MODEL_STATE["model_id"] = parts[-2]
+    else:
+        _RISK_MODEL_STATE["model_id"] = last if last else "risk-unknown"
+
+    try:
+        dest = Path(tempfile.mkdtemp(prefix="ml_risk_"))
+        _download_artifacts(artifact_uri, dest)
+
+        import xgboost as xgb
+
+        booster = xgb.Booster()
+        booster.load_model(str(dest / "xgboost_model.json"))
+
+        _RISK_MODEL_STATE["booster"] = booster
+        _RISK_MODEL_STATE["framework"] = "xgboost"
+
+        feature_cols_path = dest / "feature_cols.json"
+        if feature_cols_path.exists():
+            with open(feature_cols_path) as f:
+                _RISK_MODEL_STATE["feature_cols"] = json.load(f)
+
+        parts = artifact_uri.rstrip("/").split("/")
+        version_str = next(
+            (p for p in reversed(parts) if p.startswith("v") and p[1:].isdigit()),
+            "v1",
+        )
+        _RISK_MODEL_STATE["version"] = int(version_str[1:])
+        _RISK_MODEL_STATE["stage"] = "candidate"
+        _RISK_LOAD_FAILED = False
+        logger.info("Risk scoring model loaded: uri=%s", artifact_uri)
+
+    except Exception:  # noqa: BLE001 — catch-all for model loading
+        _RISK_LOAD_FAILED = True
+        _RISK_MODEL_STATE["version"] = 0
+        _RISK_MODEL_STATE["stage"] = "error"
+        logger.exception("Failed to load risk model from %s", artifact_uri)
+
+
+def is_risk_ready() -> bool:
+    """Return True if the risk scoring model is loaded and ready."""
+    return not _RISK_LOAD_FAILED and _RISK_MODEL_STATE.get("framework") is not None
+
+
+def predict_risk_score(text: str, features: dict[str, Any] | None = None) -> float:
+    """Compute a 0.0–1.0 risk score for a case.
+
+    Args:
+        text: Case text (used for inline feature extraction if no features).
+        features: Pre-computed case features.
+
+    Returns:
+        Risk score clamped to [0.0, 1.0].
+    """
+    import numpy as np
+    import xgboost as xgb
+
+    from ml.serving.features import compute_inline_features
+
+    if not is_risk_ready():
+        raise RuntimeError("Risk scoring model not loaded")
+
+    feat = features if features else compute_inline_features(text)
+    feature_keys = _RISK_MODEL_STATE.get("feature_cols") or sorted(feat.keys())
+    values = [float(feat.get(k) or 0) for k in feature_keys]
+    dmat = xgb.DMatrix(np.array([values], dtype=np.float32), feature_names=feature_keys)
+
+    raw_pred = _RISK_MODEL_STATE["booster"].predict(dmat)
+    score = float(raw_pred[0])
+    return max(0.0, min(1.0, score))
 
 
 # ---------------------------------------------------------------------------

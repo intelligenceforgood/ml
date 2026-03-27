@@ -77,7 +77,7 @@ SELECT COUNT(*) FROM `i4g-ml.i4g_ml.features_case_features`;
 Bootstrap the first training dataset from existing LLM classifications:
 
 ```bash
-conda run -n ml python -c "
+python -c "
 from ml.data.datasets import create_dataset_version
 create_dataset_version(
     project='i4g-ml',
@@ -93,7 +93,7 @@ create_dataset_version(
 Before training, establish the few-shot LLM baseline:
 
 ```bash
-conda run -n ml python -c "
+python -c "
 from ml.training.baseline import run_baseline, save_baseline_result
 result = run_baseline(golden_set_path='gs://i4g-ml-data/datasets/classification/golden/test.jsonl')
 save_baseline_result(result, project='i4g-ml', dataset='i4g_ml')
@@ -106,7 +106,7 @@ print(f'Baseline F1: {result.overall_f1:.4f}')
 Submit the KFP v2 pipeline to Vertex AI:
 
 ```bash
-conda run -n ml python -c "
+python -c "
 from ml.training.pipeline import training_pipeline
 from kfp import compiler
 from google.cloud import aiplatform
@@ -154,7 +154,7 @@ bq query --project_id=i4g-ml --use_legacy_sql=false \
 From the Core project, verify the `MLPlatformClient` can call the ML endpoint:
 
 ```bash
-conda run -n ml I4G_ENV=local I4G_ML__INFERENCE_BACKEND=ml_platform \
+I4G_ENV=local I4G_ML__INFERENCE_BACKEND=ml_platform \
   python -c "
 from i4g.ml.client import MLPlatformClient
 client = MLPlatformClient(base_url='https://serving-dev-<hash>.us-central1.aiplatform.googleapis.com')
@@ -169,10 +169,10 @@ Vertex AI Vizier automates hyperparameter tuning via Bayesian optimization:
 
 ```bash
 # XGBoost sweep (10 trials, CPU — ~$5 total)
-conda run -n ml make run-vizier-sweep CONFIG=pipelines/configs/classification_xgboost.yaml TRIALS=10
+make run-vizier-sweep CONFIG=pipelines/configs/classification_xgboost.yaml TRIALS=10
 
 # PyTorch sweep (5 trials, GPU — ~$25-50 total)
-conda run -n ml make run-vizier-sweep CONFIG=pipelines/configs/classification_gemma2b.yaml TRIALS=5
+make run-vizier-sweep CONFIG=pipelines/configs/classification_gemma2b.yaml TRIALS=5
 ```
 
 Vizier manages the study externally — it suggests trial parameters, you submit a pipeline with those
@@ -189,10 +189,10 @@ The graph features pipeline computes entity co-occurrence features:
 
 ```bash
 # Local validation with DirectRunner
-conda run -n ml python -m ml.data.graph_features --runner DirectRunner
+python -m ml.data.graph_features --runner DirectRunner
 
 # Submit to Dataflow (production)
-conda run -n ml make submit-graph-features-dev
+make submit-graph-features-dev
 ```
 
 Monitor the Dataflow job:

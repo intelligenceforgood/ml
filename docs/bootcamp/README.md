@@ -55,13 +55,13 @@ Work through these in order — each builds on the previous.
 If you want to validate the code without GCP access, the unit test suite covers all core logic:
 
 ```bash
-conda run -n ml pytest tests/unit -v
+pytest tests/unit -v
 ```
 
 For a specific module (e.g., evaluation):
 
 ```bash
-conda run -n ml pytest tests/unit/test_evaluation.py -v
+pytest tests/unit/test_evaluation.py -v
 ```
 
 ## Quick reference
