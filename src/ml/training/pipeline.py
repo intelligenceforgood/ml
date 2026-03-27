@@ -168,7 +168,7 @@ def evaluate_model(
             "eval_gate_passed": False,
             "error": "Empty golden test set",
         }
-        return ("false", json.dumps(metrics))
+        return EvalOutputs(passed="false", metrics_json=json.dumps(metrics))
 
     # ── Download and detect model ────────────────────────────────────────
     model_dir = Path(tempfile.mkdtemp())
@@ -185,7 +185,7 @@ def evaluate_model(
             "eval_gate_passed": False,
             "error": "label_map.json not found in model artifacts",
         }
-        return ("false", json.dumps(metrics))
+        return EvalOutputs(passed="false", metrics_json=json.dumps(metrics))
 
     with open(label_map_path) as f:
         label_map = json.load(f)
@@ -289,7 +289,7 @@ def evaluate_model(
             "eval_gate_passed": False,
             "error": "Unknown model type in artifacts",
         }
-        return ("false", json.dumps(metrics))
+        return EvalOutputs(passed="false", metrics_json=json.dumps(metrics))
 
     # ── Compute metrics (inline — avoids importing ml package in KFP) ────
     all_axes: set[str] = set()
@@ -355,7 +355,7 @@ def evaluate_model(
     }
 
     passed = "true" if gate_passed else "false"
-    return (passed, json.dumps(metrics))
+    return EvalOutputs(passed=passed, metrics_json=json.dumps(metrics))
 
 
 @dsl.component(base_image=_PIPELINE_BASE_IMAGE)
@@ -470,7 +470,7 @@ def training_pipeline(
         model_uri=train.output,  # type: ignore[attr-defined]
         display_name=experiment_name,
         serving_container_uri=serving_container_uri,
-        eval_passed=evaluate.outputs["passed"],
+        eval_passed=evaluate.outputs["passed"],  # type: ignore[attr-defined]
         capability=capability,
     )
     deploy_model(
