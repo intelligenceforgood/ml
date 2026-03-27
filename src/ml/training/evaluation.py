@@ -428,5 +428,10 @@ def _spearman(x: list[float], y: list[float]) -> float:
     rx = _rank(x)
     ry = _rank(y)
 
+    # If all ranks in either variable are identical (zero variance),
+    # correlation is undefined — return 0.0 by convention.
+    if len(set(rx)) == 1 or len(set(ry)) == 1:
+        return 0.0
+
     d_sq = sum((a - b) ** 2 for a, b in zip(rx, ry, strict=False))
     return 1.0 - (6.0 * d_sq) / (n * (n * n - 1))

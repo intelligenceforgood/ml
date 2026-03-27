@@ -109,6 +109,7 @@ def evaluate_model(
     golden_set_uri: str,
     min_overall_f1: float,
     max_per_axis_regression: float,
+    capability: str = "classification",
 ) -> EvalOutputs:
     """Evaluate a trained model against the golden test set.
 
@@ -291,6 +292,75 @@ def evaluate_model(
         }
         return EvalOutputs(passed="false", metrics_json=json.dumps(metrics))
 
+    # ── Risk scoring: regression eval ────────────────────────────────────
+    if capability == "risk_scoring":
+        # For risk scoring, predictions/ground_truth are lists of scalar dicts
+        # with key "risk_score" (float 0.0–1.0).
+        pred_vals = [float(p.get("risk_score", 0.0)) for p in predictions]
+        gt_vals = [float(g.get("risk_score", 0.0)) for g in ground_truth]
+
+        n = len(pred_vals)
+        if n == 0:
+            metrics = {
+                "mse": 0.0,
+                "mae": 0.0,
+                "rmse": 0.0,
+                "spearman_rho": 0.0,
+                "total_samples": 0,
+                "eval_gate_passed": False,
+                "error": "No samples for risk scoring eval",
+            }
+            return EvalOutputs(passed="false", metrics_json=json.dumps(metrics))
+
+        errors = [p - g for p, g in zip(pred_vals, gt_vals, strict=False)]
+        sq_errors = [e * e for e in errors]
+        abs_errors = [abs(e) for e in errors]
+        mse = sum(sq_errors) / n
+        mae = sum(abs_errors) / n
+        rmse = mse**0.5
+
+        # Spearman rank correlation (inline implementation)
+        def _rank(vals: list[float]) -> list[float]:
+            indexed = sorted(enumerate(vals), key=lambda t: t[1])
+            ranks = [0.0] * len(vals)
+            i = 0
+            while i < len(vals):
+                j = i
+                while j < len(vals) - 1 and indexed[j + 1][1] == indexed[j][1]:
+                    j += 1
+                avg_rank = (i + j) / 2.0 + 1.0
+                for k in range(i, j + 1):
+                    ranks[indexed[k][0]] = avg_rank
+                i = j + 1
+            return ranks
+
+        if n >= 2:
+            rx = _rank(pred_vals)
+            ry = _rank(gt_vals)
+            mean_rx = sum(rx) / n
+            mean_ry = sum(ry) / n
+            cov = sum((a - mean_rx) * (b - mean_ry) for a, b in zip(rx, ry, strict=False))
+            std_rx = (sum((a - mean_rx) ** 2 for a in rx)) ** 0.5
+            std_ry = (sum((b - mean_ry) ** 2 for b in ry)) ** 0.5
+            spearman_rho = cov / (std_rx * std_ry) if std_rx > 0 and std_ry > 0 else 0.0
+        else:
+            spearman_rho = 0.0
+
+        # Gate: MSE ≤ threshold (reuse min_overall_f1 slot as max_mse),
+        # Spearman ≥ 0.6
+        gate_passed = mse <= min_overall_f1 and spearman_rho >= 0.6
+
+        metrics = {
+            "mse": mse,
+            "mae": mae,
+            "rmse": rmse,
+            "spearman_rho": spearman_rho,
+            "total_samples": n,
+            "eval_gate_passed": gate_passed,
+        }
+        passed = "true" if gate_passed else "false"
+        return EvalOutputs(passed=passed, metrics_json=json.dumps(metrics))
+
     # ── Compute metrics (inline — avoids importing ml package in KFP) ────
     all_axes: set[str] = set()
     for gt in ground_truth:
@@ -463,6 +533,7 @@ def training_pipeline(
         golden_set_uri=golden_set_uri,
         min_overall_f1=min_overall_f1,
         max_per_axis_regression=max_per_axis_regression,
+        capability=capability,
     )
     register = register_model(
         project_id=project_id,

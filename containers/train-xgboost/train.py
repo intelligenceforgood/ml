@@ -94,7 +94,13 @@ def prepare_features(records: list[dict], feature_cols: list[str]) -> pd.DataFra
 
 
 def train(config: dict, train_data: list[dict], eval_data: list[dict]) -> Path:
-    """Train XGBoost classifier on tabular features."""
+    """Train XGBoost model on tabular features.
+
+    Dispatches between classifier (multi:softprob) and regressor (reg:squarederror)
+    based on ``config["capability"]``.
+    """
+    capability = config.get("capability", "classification")
+
     feature_cols = [
         "text_length",
         "word_count",
@@ -110,7 +116,23 @@ def train(config: dict, train_data: list[dict], eval_data: list[dict]) -> Path:
     X_train = prepare_features(train_data, feature_cols)
     X_eval = prepare_features(eval_data, feature_cols)
 
-    # Use the first axis for labels
+    hyperparams = config.get("hyperparameters", {})
+
+    if capability == "risk_scoring":
+        return _train_regressor(config, X_train, X_eval, train_data, eval_data, feature_cols, hyperparams)
+    return _train_classifier(config, X_train, X_eval, train_data, eval_data, feature_cols, hyperparams)
+
+
+def _train_classifier(
+    config: dict,
+    X_train: pd.DataFrame,
+    X_eval: pd.DataFrame,
+    train_data: list[dict],
+    eval_data: list[dict],
+    feature_cols: list[str],
+    hyperparams: dict,
+) -> Path:
+    """Train an XGBoost multi-class classifier."""
     label_schema = config.get("label_schema", {})
     first_axis = next(iter(label_schema)) if label_schema else "INTENT"
 
@@ -122,7 +144,6 @@ def train(config: dict, train_data: list[dict], eval_data: list[dict]) -> Path:
     y_train = le.transform(y_train_raw)
     y_eval = le.transform(y_eval_raw)
 
-    hyperparams = config.get("hyperparameters", {})
     params = {
         "objective": "multi:softprob",
         "num_class": len(le.classes_),
@@ -144,7 +165,6 @@ def train(config: dict, train_data: list[dict], eval_data: list[dict]) -> Path:
         verbose_eval=10,
     )
 
-    # Evaluate
     y_pred = np.argmax(model.predict(deval), axis=1)
     f1 = f1_score(y_eval, y_pred, average="weighted")
     logger.info("Eval weighted F1: %.4f", f1)
@@ -155,7 +175,6 @@ def train(config: dict, train_data: list[dict], eval_data: list[dict]) -> Path:
         ),
     )
 
-    # Save
     output_dir = Path("/tmp/model_output")
     output_dir.mkdir(parents=True, exist_ok=True)
     model.save_model(str(output_dir / "xgboost_model.json"))
@@ -165,6 +184,59 @@ def train(config: dict, train_data: list[dict], eval_data: list[dict]) -> Path:
         json.dump(feature_cols, f)
     with open(output_dir / "metrics.json", "w") as f:
         json.dump({"weighted_f1": float(f1)}, f)
+
+    return output_dir
+
+
+def _train_regressor(
+    config: dict,
+    X_train: pd.DataFrame,
+    X_eval: pd.DataFrame,
+    train_data: list[dict],
+    eval_data: list[dict],
+    feature_cols: list[str],
+    hyperparams: dict,
+) -> Path:
+    """Train an XGBoost regressor for risk scoring."""
+    from scipy.stats import spearmanr
+
+    label_key = config.get("label_key", "severity")
+    y_train = np.array([float(r.get("labels", {}).get(label_key, 0.0)) for r in train_data])
+    y_eval = np.array([float(r.get("labels", {}).get(label_key, 0.0)) for r in eval_data])
+
+    params = {
+        "objective": "reg:squarederror",
+        "max_depth": hyperparams.get("max_depth", 6),
+        "learning_rate": hyperparams.get("learning_rate", 0.05),
+        "eval_metric": "rmse",
+        "tree_method": "hist",
+    }
+
+    dtrain = xgb.DMatrix(X_train, label=y_train, feature_names=feature_cols)
+    deval = xgb.DMatrix(X_eval, label=y_eval, feature_names=feature_cols)
+
+    model = xgb.train(
+        params,
+        dtrain,
+        num_boost_round=hyperparams.get("num_boost_round", 200),
+        evals=[(deval, "eval")],
+        early_stopping_rounds=15,
+        verbose_eval=10,
+    )
+
+    y_pred = model.predict(deval)
+    mse = float(np.mean((y_pred - y_eval) ** 2))
+    mae = float(np.mean(np.abs(y_pred - y_eval)))
+    rho, _ = spearmanr(y_pred, y_eval) if len(y_eval) >= 2 else (0.0, 1.0)
+    logger.info("Eval MSE: %.4f  MAE: %.4f  Spearman: %.4f", mse, mae, rho)
+
+    output_dir = Path("/tmp/model_output")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    model.save_model(str(output_dir / "xgboost_model.json"))
+    with open(output_dir / "feature_cols.json", "w") as f:
+        json.dump(feature_cols, f)
+    with open(output_dir / "metrics.json", "w") as f:
+        json.dump({"mse": mse, "mae": mae, "spearman_rho": float(rho)}, f)
 
     return output_dir
 

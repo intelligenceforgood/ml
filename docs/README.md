@@ -12,6 +12,8 @@ Developer documentation for the I4G ML Platform.
 
 - [Deployment](runbooks/deployment.md) — step-by-step deployment guide
 - [Retraining](runbooks/retraining.md) — continuous retraining trigger and E2E loop
+- [Batch Prediction](runbooks/batch_prediction.md) — batch scoring Cloud Run Job
+- [Feature Store](runbooks/feature_store.md) — Vertex AI Feature Store sync and online serving
 
 ## Developer Bootcamp
 

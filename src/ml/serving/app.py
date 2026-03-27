@@ -410,6 +410,16 @@ async def predict_similar_cases(req: SimilarCasesRequest) -> SimilarCasesRespons
         logger.exception("Similarity search failed for case %s", req.case_id)
         raise HTTPException(status_code=500, detail="Similarity search failed") from exc
 
+    log_prediction(
+        prediction_id=prediction_id,
+        case_id=req.case_id,
+        model_id=os.environ.get("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2"),
+        model_version=0,
+        prediction={"similar_cases": [{"case_id": r.case_id, "score": r.score} for r in results]},
+        features=None,
+        capability="document_similarity",
+    )
+
     return SimilarCasesResponse(
         case_id=req.case_id,
         similar_cases=[SimilarCaseResult(case_id=r.case_id, distance=r.distance, score=r.score) for r in results],

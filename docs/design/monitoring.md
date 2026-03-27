@@ -327,3 +327,96 @@ Create a BigQuery-backed Looker Studio dashboard with:
 3. **Override rate** — trend line per axis
 4. **Model performance** — F1 over time per axis
 5. **Latency** — P50/P90/P99 time series
+
+---
+
+## Champion/Challenger Variant Comparison
+
+The `analytics_variant_comparison` table stores per-variant accuracy breakdowns
+produced by `monitoring.accuracy.materialize_variant_comparison()`.
+
+### Variant Performance Side-by-Side
+
+```sql
+SELECT
+  variant,
+  axis,
+  f1,
+  correction_rate,
+  sample_count,
+  computed_at
+FROM `i4g-ml.i4g_ml.analytics_variant_comparison`
+WHERE computed_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
+ORDER BY computed_at DESC, variant, axis;
+```
+
+### Challenger vs Champion Δ F1
+
+```sql
+WITH latest AS (
+  SELECT variant, axis, f1
+  FROM `i4g-ml.i4g_ml.analytics_variant_comparison`
+  WHERE computed_at = (
+    SELECT MAX(computed_at) FROM `i4g-ml.i4g_ml.analytics_variant_comparison`
+  )
+)
+SELECT
+  c.axis,
+  c.f1 AS champion_f1,
+  ch.f1 AS challenger_f1,
+  ROUND(ch.f1 - c.f1, 4) AS delta_f1
+FROM latest c
+JOIN latest ch ON c.axis = ch.axis
+WHERE c.variant = 'champion' AND ch.variant = 'challenger'
+ORDER BY delta_f1 DESC;
+```
+
+### Alerting on Variant Regression
+
+Add a scheduled alert (6:15 AM UTC) that fires when the challenger's F1 drops
+below the champion's by more than 5 percentage points:
+
+```sql
+SELECT axis, champion_f1, challenger_f1, delta_f1
+FROM (<above query>)
+WHERE delta_f1 < -0.05;
+```
+
+---
+
+## Risk Scoring Metrics
+
+Risk scoring predictions are logged with `capability = 'risk_scoring'` in
+`predictions_prediction_log`. Accuracy is evaluated against analyst severity
+ratings via MSE and Spearman rank correlation.
+
+### Risk Score Distribution (last 30 days)
+
+```sql
+SELECT
+  ROUND(CAST(JSON_VALUE(prediction, '$.risk_score') AS FLOAT64), 1) AS score_bucket,
+  COUNT(*) AS count
+FROM `i4g-ml.i4g_ml.predictions_prediction_log`
+WHERE capability = 'risk_scoring'
+  AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
+GROUP BY score_bucket
+ORDER BY score_bucket;
+```
+
+### Cost-per-Correct-Prediction
+
+The `analytics_model_performance` table includes a `cost_per_correct_prediction`
+field (added by `materialize_performance()`), combining cost summary data from
+`monitoring.cost` with per-model accuracy.
+
+```sql
+SELECT
+  model_id,
+  model_version,
+  f1,
+  cost_per_correct_prediction,
+  computed_at
+FROM `i4g-ml.i4g_ml.analytics_model_performance`
+WHERE cost_per_correct_prediction IS NOT NULL
+ORDER BY computed_at DESC;
+```

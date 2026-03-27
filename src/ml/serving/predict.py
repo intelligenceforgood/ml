@@ -399,6 +399,25 @@ def _load_shadow_xgboost(artifact_dir: Path) -> None:
     logger.info("Loaded shadow XGBoost model from %s", artifact_dir)
 
 
+def _fetch_features_with_fallback(text: str, case_id: str) -> dict[str, Any]:
+    """Try Feature Store first, fall back to inline feature computation.
+
+    When ``FEATURE_STORE_ID`` is set, attempts a sub-100ms online read from
+    Vertex AI Feature Store via ``fetch_online_features()``.  On miss or
+    error, falls back to ``compute_inline_features()``.
+    """
+    if os.environ.get("FEATURE_STORE_ID"):
+        from ml.data.feature_store import fetch_online_features
+
+        fs_features = fetch_online_features(case_id)
+        if fs_features is not None:
+            return fs_features
+
+    from ml.serving.features import compute_inline_features
+
+    return compute_inline_features(text)
+
+
 def classify_text(
     text: str,
     case_id: str,
@@ -433,6 +452,10 @@ def classify_text(
         raise RuntimeError("Model failed to load — serving unavailable")
     if variant == "challenger" and _CHALLENGER_LOAD_FAILED:
         raise RuntimeError("Challenger model failed to load")
+
+    # Enrich features with Feature Store when configured (Sprint 3.3)
+    if features is None:
+        features = _fetch_features_with_fallback(text, case_id)
 
     if framework == "pytorch":
         prediction = _predict_with_state(model_state, text, features, framework="pytorch")

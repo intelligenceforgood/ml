@@ -88,11 +88,13 @@ SELECT
     p.model_id,
     p.model_version,
     p.prediction,
+    p.variant,
     o.correction
 FROM `{project}.{dataset}.{pred_table}` p
 INNER JOIN `{project}.{dataset}.{out_table}` o
     ON p.prediction_id = o.prediction_id
 WHERE p.timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @lookback_days DAY)
+  AND p.is_shadow IS NOT TRUE
 """
 
 
@@ -123,6 +125,7 @@ def compute_accuracy_metrics(
     *,
     lookback_days: int = 7,
     model_id: str | None = None,
+    variant: str | None = None,
     client: bigquery.Client | None = None,
 ) -> AccuracyReport:
     """Query BigQuery and compute per-model per-axis accuracy metrics.
@@ -130,6 +133,8 @@ def compute_accuracy_metrics(
     Args:
         lookback_days: Number of days of prediction history to include.
         model_id: Restrict to a single model (optional).
+        variant: Restrict to a single variant, e.g. ``"champion"`` or
+            ``"challenger"`` (optional).
         client: Optional pre-configured BigQuery client (for testing).
 
     Returns:
@@ -148,11 +153,14 @@ def compute_accuracy_metrics(
     )
     if model_id:
         query += "\n    AND p.model_id = @model_id"
+    if variant:
+        query += "\n    AND p.variant = @variant"
 
     job_config = bq.QueryJobConfig(
         query_parameters=[
             bq.ScalarQueryParameter("lookback_days", "INT64", lookback_days),
             *([bq.ScalarQueryParameter("model_id", "STRING", model_id)] if model_id else []),
+            *([bq.ScalarQueryParameter("variant", "STRING", variant)] if variant else []),
         ],
     )
 
@@ -265,6 +273,17 @@ def materialize_performance(
     bq_client = client or _get_bq_client()
     table = f"{settings.platform.project_id}.{settings.bigquery.dataset_id}.analytics_model_performance"
 
+    # Fetch cost-per-prediction for cost_per_correct metric (Sprint 6.3)
+    cost_per_prediction: float | None = None
+    try:
+        from ml.monitoring.cost import compute_cost_summary
+
+        cost_summary = compute_cost_summary(period_days=lookback_days, client=bq_client)
+        if cost_summary and cost_summary.cost_per_prediction_usd > 0:
+            cost_per_prediction = cost_summary.cost_per_prediction_usd
+    except Exception:  # noqa: BLE001 — cost data is supplementary
+        logger.debug("Could not fetch cost data for cost_per_correct metric", exc_info=True)
+
     now = datetime.now(UTC)
     computed_date = now.strftime("%Y-%m-%d")
 
@@ -298,6 +317,9 @@ def materialize_performance(
                 "correction_rate": round(m.override_rate, 4),
                 "per_axis_metrics": per_axis_json,
                 "f1": round(m.f1, 4),
+                "cost_per_correct_prediction": (
+                    round(_safe_div(cost_per_prediction, m.accuracy), 6) if cost_per_prediction is not None else None
+                ),
             }
         )
 
@@ -573,6 +595,68 @@ def compute_variant_comparison(
 
 
 # ---------------------------------------------------------------------------
+# Variant comparison materialization (Sprint 1.3)
+# ---------------------------------------------------------------------------
+
+
+def materialize_variant_comparison(
+    *,
+    lookback_days: int = 7,
+    client: bigquery.Client | None = None,
+) -> int:
+    """Compute variant comparison and write to ``analytics_variant_comparison``.
+
+    Returns:
+        Number of rows written.
+    """
+    comparison = compute_variant_comparison(lookback_days=lookback_days, client=client)
+    variants = [v for v in (comparison.champion, comparison.challenger) if v is not None]
+    if not variants:
+        logger.info("No variant data in the last %d days — nothing to materialize", lookback_days)
+        return 0
+
+    settings = get_settings()
+    bq_client = client or _get_bq_client()
+    table = f"{settings.platform.project_id}.{settings.bigquery.dataset_id}.analytics_variant_comparison"
+
+    rows_to_insert = []
+    for vm in variants:
+        per_axis_json = json.dumps(
+            {
+                axis: {
+                    "accuracy": round(am.accuracy, 4),
+                    "override_rate": round(am.override_rate, 4),
+                    "f1": round(am.f1, 4),
+                    "total": am.total,
+                }
+                for axis, am in vm.per_axis.items()
+            }
+        )
+        rows_to_insert.append(
+            {
+                "variant": vm.variant,
+                "model_id": vm.model_id,
+                "total_outcomes": vm.total_outcomes,
+                "correct": vm.correct,
+                "accuracy": round(vm.accuracy, 4),
+                "override_rate": round(vm.override_rate, 4),
+                "f1": round(vm.f1, 4),
+                "per_axis_metrics": per_axis_json,
+                "lookback_days": lookback_days,
+                "computed_at": comparison.computed_at,
+            }
+        )
+
+    errors = bq_client.insert_rows_json(table, rows_to_insert)
+    if errors:
+        logger.error("BigQuery insert errors for analytics_variant_comparison: %s", errors)
+        raise RuntimeError(f"Failed to materialize variant comparison: {errors}")
+
+    logger.info("Materialized %d variant comparison rows", len(rows_to_insert))
+    return len(rows_to_insert)
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point (for Cloud Run Job / Cloud Scheduler)
 # ---------------------------------------------------------------------------
 
@@ -582,6 +666,9 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     rows = materialize_performance()
     logger.info("Accuracy materialization complete — %d rows written", rows)
+
+    variant_rows = materialize_variant_comparison()
+    logger.info("Variant comparison materialization complete — %d rows written", variant_rows)
 
 
 if __name__ == "__main__":

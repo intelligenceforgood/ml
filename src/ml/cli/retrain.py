@@ -18,20 +18,14 @@ _DEFAULT_CONFIGS: dict[str, str] = {
 }
 
 
-@retrain_app.command("trigger")
-def trigger(
-    capability: str = typer.Option(
-        "classification", "--capability", "-c", help="ML capability to evaluate (classification, ner, risk_scoring)."
-    ),
-    force: bool = typer.Option(False, "--force", "-f", help="Force retraining regardless of conditions."),
-    image_tag: str = typer.Option("dev", "--image-tag", "-t", help="Container image tag (dev or prod)."),
+def run(
+    capability: str = "classification",
+    force: bool = False,
+    image_tag: str = "dev",
 ) -> None:
-    """Evaluate retraining conditions and submit pipeline if warranted.
+    """Core retraining trigger logic — callable from CLI and tests.
 
-    Checks three conditions: data volume (≥200 new labels), drift (PSI > 0.2),
-    and time (>30 days since last training). If any condition is met (or --force),
-    submits a training pipeline.
-
+    Evaluates retraining conditions and submits a pipeline if warranted.
     Always exits with code 0 — Cloud Run Jobs treat exit 1 as failure.
     """
     try:
@@ -53,9 +47,8 @@ def trigger(
 
         trigger_reason = trigger_result.reasons[0].split(":")[0] if trigger_result.reasons else "unknown"
 
-        # Submit pipeline
-        # Use the underlying submit_pipeline function directly
-        from scripts.submit_pipeline import submit_pipeline
+        # Submit pipeline via shared library
+        from ml.training.submission import submit_pipeline
 
         pipeline_job_name = submit_pipeline(
             config_path=config_path,
@@ -79,3 +72,20 @@ def trigger(
     except Exception:
         logger.exception("Trigger evaluation failed")
         # Always exit 0 — Cloud Run Jobs convention
+
+
+@retrain_app.command("trigger")
+def trigger(
+    capability: str = typer.Option(
+        "classification", "--capability", "-c", help="ML capability to evaluate (classification, ner, risk_scoring)."
+    ),
+    force: bool = typer.Option(False, "--force", "-f", help="Force retraining regardless of conditions."),
+    image_tag: str = typer.Option("dev", "--image-tag", "-t", help="Container image tag (dev or prod)."),
+) -> None:
+    """Evaluate retraining conditions and submit pipeline if warranted.
+
+    Checks three conditions: data volume (≥200 new labels), drift (PSI > 0.2),
+    and time (>30 days since last training). If any condition is met (or --force),
+    submits a training pipeline.
+    """
+    run(capability=capability, force=force, image_tag=image_tag)

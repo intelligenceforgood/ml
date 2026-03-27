@@ -259,3 +259,68 @@ label schema, eval gate thresholds, and promotion criteria — so they are inter
 pipeline.
 
 Use `i4g-ml eval compare-frameworks` to compare evaluation metrics side-by-side.
+
+## Champion/Challenger A/B Routing
+
+The serving layer supports A/B traffic splitting between two model variants:
+
+- **Champion:** the current production model (loaded from `MODEL_ARTIFACT_URI`)
+- **Challenger:** a candidate model under evaluation (loaded from `CHALLENGER_MODEL_ARTIFACT_URI`)
+
+Traffic is split by `CHALLENGER_TRAFFIC_WEIGHT` (0.0–1.0). Two split strategies are available:
+
+| Strategy        | Behavior                                     |
+| --------------- | -------------------------------------------- |
+| `random`        | Uniform random roll per request              |
+| `deterministic` | FNV-1a hash of `case_id` for reproducibility |
+
+Each prediction logs a `variant` column (`champion` or `challenger`) in `prediction_log`. The
+`accuracy_materialization` job computes per-variant metrics and writes to
+`analytics_variant_comparison`. When `COST_AWARE_ROUTING=true`, the router selects the cheapest model
+meeting a quality bar (`f1_score >= 0.8`), overriding the random/deterministic split.
+
+## Batch Prediction
+
+The `batch-prediction` Cloud Run Job re-classifies historical cases in bulk:
+
+- Entry point: `scripts/run_batch_prediction.py`
+- Capabilities: `classification`, `ner`, `risk_scoring`, `embedding`
+- Reads from BigQuery, runs inference in configurable batch sizes, writes to `batch_predictions`
+- On-demand only (no scheduled trigger) — invoked via `make run-batch-dev`
+
+## Vertex AI Feature Store
+
+Online feature serving for sub-100ms feature retrieval during prediction:
+
+- **Feature Store:** `i4g_ml_features` (Vertex AI Feature Store, 1 fixed node)
+- **Entity type:** `case` (keyed by `case_id`)
+- **Features:** mirrors `FEATURE_CATALOG` — text, entity, indicator, classification, structural
+- **Sync:** `feature-store-sync` Cloud Run Job runs weekly (Sunday 5 AM UTC) after data refresh.
+  Uses incremental watermark (`_computed_at`) to sync only new/updated features.
+- **Online read:** `fetch_online_features(case_id)` in the serving container, with LRU cache
+  (128 entries, 60s TTL). Falls back to `compute_inline_features()` if Feature Store is
+  unavailable or returns empty.
+- **Configuration:** enabled by setting `FEATURE_STORE_ID` env var on the serving container.
+
+## Risk Scoring
+
+Third capability on the platform — a regression model predicting case risk (0.0–1.0):
+
+- **Model:** XGBoost regressor (`reg:squarederror` objective)
+- **Features:** union of `features_case_features` + `features_graph_features`
+- **Eval metrics:** MSE + Spearman rank correlation with analyst severity judgments
+- **Promotion gate:** MSE ≤ champion, Spearman ≥ 0.6
+- **Serving:** `POST /predict/risk-score` returns clamped float + prediction ID
+- **Configuration:** `RISK_MODEL_ARTIFACT_URI` env var on the serving container
+
+## Document Similarity
+
+Fourth capability — finds similar cases via embedding-based search:
+
+- **Embedding model:** sentence-transformers (default `all-MiniLM-L6-v2`, 384 dims)
+- **Index:** in-process FAISS (flat L2) for < 10K cases. Matching Engine planned for Phase 4.
+- **Serving:** `POST /predict/similar-cases` returns top-K case IDs + distance scores
+- **Index rebuild:** on container startup, loads latest embeddings from
+  `features_case_embeddings` BigQuery table → builds FAISS index. Embedding refresh runs weekly
+  via `embedding-refresh` Cloud Run Job (Sunday 6 AM UTC).
+- **Configuration:** `EMBEDDING_MODEL_NAME` env var on the serving container

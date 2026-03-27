@@ -1,27 +1,14 @@
-"""Unit tests for pipeline submission utility."""
+"""Unit tests for pipeline submission library."""
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
-
-# submit_pipeline.py lives in scripts/, not in the ml package, so we add it to the path
-SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent / "scripts"
 
 
 class TestSubmitPipeline:
-    @pytest.fixture(autouse=True)
-    def _add_scripts_to_path(self):
-        sys.path.insert(0, str(SCRIPTS_DIR))
-        yield
-        sys.path.remove(str(SCRIPTS_DIR))
-
-    @patch("submit_pipeline.aiplatform")
+    @patch("ml.training.submission.aiplatform")
     def test_submit_with_config(self, mock_aip, tmp_path):
-        from submit_pipeline import submit_pipeline
+        from ml.training.submission import submit_pipeline
 
         # Create a minimal config YAML
         config_file = tmp_path / "test_config.yaml"
@@ -61,9 +48,9 @@ class TestSubmitPipeline:
         assert labels["trigger_reason"] == "data_volume"
         assert labels["framework"] == "xgboost"
 
-    @patch("submit_pipeline.aiplatform")
+    @patch("ml.training.submission.aiplatform")
     def test_submit_without_config(self, mock_aip):
-        from submit_pipeline import submit_pipeline
+        from ml.training.submission import submit_pipeline
 
         mock_job = MagicMock()
         mock_job.resource_name = "pipelineJobs/manual-123"
@@ -74,9 +61,9 @@ class TestSubmitPipeline:
         assert result == "pipelineJobs/manual-123"
         mock_job.submit.assert_called_once()
 
-    @patch("submit_pipeline.aiplatform")
+    @patch("ml.training.submission.aiplatform")
     def test_framework_maps_to_container(self, mock_aip, tmp_path):
-        from submit_pipeline import submit_pipeline
+        from ml.training.submission import submit_pipeline
 
         config_file = tmp_path / "xgb.yaml"
         config_file.write_text("framework: xgboost\ncapability: classification\n")
@@ -90,9 +77,9 @@ class TestSubmitPipeline:
         params = mock_aip.PipelineJob.call_args[1]["parameter_values"]
         assert "train-xgboost" in params["container_uri"]
 
-    @patch("submit_pipeline.aiplatform")
+    @patch("ml.training.submission.aiplatform")
     def test_pytorch_default_container(self, mock_aip, tmp_path):
-        from submit_pipeline import submit_pipeline
+        from ml.training.submission import submit_pipeline
 
         config_file = tmp_path / "pt.yaml"
         config_file.write_text("framework: pytorch\ncapability: classification\n")
@@ -106,9 +93,9 @@ class TestSubmitPipeline:
         params = mock_aip.PipelineJob.call_args[1]["parameter_values"]
         assert "train-pytorch" in params["container_uri"]
 
-    @patch("submit_pipeline.aiplatform")
+    @patch("ml.training.submission.aiplatform")
     def test_custom_image_tag(self, mock_aip, tmp_path):
-        from submit_pipeline import submit_pipeline
+        from ml.training.submission import submit_pipeline
 
         config_file = tmp_path / "c.yaml"
         config_file.write_text("framework: xgboost\ncapability: classification\n")
@@ -122,9 +109,9 @@ class TestSubmitPipeline:
         params = mock_aip.PipelineJob.call_args[1]["parameter_values"]
         assert ":prod" in params["container_uri"]
 
-    @patch("submit_pipeline.aiplatform")
+    @patch("ml.training.submission.aiplatform")
     def test_experiment_name_auto_generated(self, mock_aip, tmp_path):
-        from submit_pipeline import submit_pipeline
+        from ml.training.submission import submit_pipeline
 
         config_file = tmp_path / "c.yaml"
         config_file.write_text("model_id: my-model\ncapability: classification\n")
@@ -139,7 +126,7 @@ class TestSubmitPipeline:
         assert call_kwargs["display_name"].startswith("my-model-")
 
     def test_auto_compile_skips_when_no_source(self, tmp_path, monkeypatch):
-        from submit_pipeline import _auto_compile_if_stale
+        from ml.training.submission import _auto_compile_if_stale
 
         monkeypatch.chdir(tmp_path)
         # No source file, no compilation attempt, no error

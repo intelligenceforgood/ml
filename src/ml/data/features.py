@@ -29,6 +29,7 @@ class ComputeMethod(StrEnum):
     BIGQUERY_SQL = "bigquery_sql"
     DATAFLOW = "dataflow"
     PYTHON = "python"
+    MODEL = "model"
 
 
 class FeatureDefinition(BaseModel):
@@ -132,6 +133,19 @@ FEATURE_CATALOG: list[FeatureDefinition] = [
         feature_type=FeatureType.NUMERIC,
         description="Size of the connected component this case belongs to in entity co-occurrence graph",
         compute_method=ComputeMethod.DATAFLOW,
+    ),
+    # ── Model-produced features ────────────────────────────────────────────
+    FeatureDefinition(
+        name="risk_score",
+        feature_type=FeatureType.NUMERIC,
+        description="Fraud risk score (0.0–1.0) produced by the risk scoring model",
+        compute_method=ComputeMethod.MODEL,
+    ),
+    FeatureDefinition(
+        name="case_embedding",
+        feature_type=FeatureType.EMBEDDING,
+        description="Dense embedding vector from sentence-transformer model",
+        compute_method=ComputeMethod.MODEL,
     ),
 ]
 

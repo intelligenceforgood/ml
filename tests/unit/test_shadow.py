@@ -140,15 +140,16 @@ class TestShadowInference:
         finally:
             del sys.modules["xgboost"]
 
-    def test_shadow_failure_bubbles_up(self):
+    @patch("xgboost.DMatrix")
+    @patch("ml.serving.features.compute_inline_features", return_value={"text_length": 10})
+    def test_shadow_failure_bubbles_up(self, mock_features, mock_dmat):
         """When shadow inference fails, the error propagates (caught by app layer)."""
         _SHADOW_MODEL_STATE["framework"] = "xgboost"
         _SHADOW_MODEL_STATE["model_id"] = "bad"
         _SHADOW_MODEL_STATE["version"] = 1
         _SHADOW_MODEL_STATE["stage"] = "shadow"
         _SHADOW_MODEL_STATE["label_map"] = {"INTENT": ["A"]}
-        # No booster and no xgboost module — will raise an error
-        # The app layer (_run_shadow_inference) catches all exceptions
+        # No booster key — will raise KeyError when accessing _SHADOW_MODEL_STATE["booster"]
         with pytest.raises((KeyError, TypeError, RuntimeError, ModuleNotFoundError)):
             classify_text_shadow("text", "case-1", "champ-1")
 
@@ -176,11 +177,13 @@ class TestShadowDoesNotBlockChampion:
         assert result["prediction"]["INTENT"]["code"] == "INTENT.UNKNOWN"
 
     @pytest.mark.asyncio
-    async def test_shadow_task_exception_caught(self):
+    @patch("xgboost.DMatrix")
+    @patch("ml.serving.features.compute_inline_features", return_value={"text_length": 10})
+    async def test_shadow_task_exception_caught(self, mock_features, mock_dmat):
         """The async shadow wrapper catches all exceptions."""
         from ml.serving.app import _run_shadow_inference
 
-        # Shadow model is "ready" but will fail
+        # Shadow model is "ready" but will fail (no booster key)
         _SHADOW_MODEL_STATE["framework"] = "xgboost"
         _SHADOW_MODEL_STATE["model_id"] = "broken"
         _SHADOW_MODEL_STATE["label_map"] = {"INTENT": ["A"]}
