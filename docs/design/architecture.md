@@ -283,7 +283,7 @@ meeting a quality bar (`f1_score >= 0.8`), overriding the random/deterministic s
 
 The `batch-prediction` Cloud Run Job re-classifies historical cases in bulk:
 
-- Entry point: `scripts/run_batch_prediction.py`
+- Entry point: `i4g-ml serve batch` (CLI) / `ml.cli.serve.run_batch()` (library)
 - Capabilities: `classification`, `ner`, `risk_scoring`, `embedding`
 - Reads from BigQuery, runs inference in configurable batch sizes, writes to `batch_predictions`
 - On-demand only (no scheduled trigger) — invoked via `make run-batch-dev`

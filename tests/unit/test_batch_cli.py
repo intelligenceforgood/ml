@@ -1,59 +1,62 @@
-"""Unit tests for batch prediction CLI entry point (Sprint 2.2)."""
+"""Unit tests for batch prediction CLI command (Sprint 2.2)."""
 
 from __future__ import annotations
 
 from unittest.mock import patch
 
-from scripts.run_batch_prediction import main, parse_args
+from ml.cli.serve import run_batch
 
 
-class TestParseArgs:
-    """CLI argument parsing."""
-
-    def test_defaults(self):
-        args = parse_args([])
-        assert args.capability == "classification"
-        assert args.model_artifact_uri == ""
-        assert args.source_query is None
-        assert args.dest_table is None
-        assert args.batch_size == 100
-
-    def test_all_args(self):
-        args = parse_args(
-            [
-                "--capability",
-                "embedding",
-                "--model-artifact-uri",
-                "gs://bucket/model/v1",
-                "--source-query",
-                "SELECT * FROM t",
-                "--dest-table",
-                "project.dataset.table",
-                "--batch-size",
-                "50",
-            ]
-        )
-        assert args.capability == "embedding"
-        assert args.model_artifact_uri == "gs://bucket/model/v1"
-        assert args.source_query == "SELECT * FROM t"
-        assert args.dest_table == "project.dataset.table"
-        assert args.batch_size == 50
-
-    def test_ner_capability(self):
-        args = parse_args(["--capability", "ner"])
-        assert args.capability == "ner"
-
-    def test_risk_scoring_capability(self):
-        args = parse_args(["--capability", "risk_scoring"])
-        assert args.capability == "risk_scoring"
-
-
-class TestMain:
-    """Entry point wiring."""
+class TestRunBatch:
+    """Batch prediction CLI wiring."""
 
     @patch("ml.serving.batch.run_batch_prediction")
-    def test_calls_batch_with_parsed_args(self, mock_run):
-        main(["--capability", "embedding", "--batch-size", "25"])
+    def test_defaults(self, mock_run):
+        run_batch()
+
+        mock_run.assert_called_once_with(
+            capability="classification",
+            model_artifact_uri="",
+            source_query=None,
+            dest_table=None,
+            batch_size=100,
+        )
+
+    @patch("ml.serving.batch.run_batch_prediction")
+    def test_all_args(self, mock_run):
+        run_batch(
+            capability="embedding",
+            model_artifact_uri="gs://bucket/model/v1",
+            source_query="SELECT * FROM t",
+            dest_table="project.dataset.table",
+            batch_size=50,
+        )
+
+        mock_run.assert_called_once_with(
+            capability="embedding",
+            model_artifact_uri="gs://bucket/model/v1",
+            source_query="SELECT * FROM t",
+            dest_table="project.dataset.table",
+            batch_size=50,
+        )
+
+    @patch("ml.serving.batch.run_batch_prediction")
+    def test_ner_capability(self, mock_run):
+        run_batch(capability="ner")
+
+        mock_run.assert_called_once()
+        assert mock_run.call_args[1]["capability"] == "ner"
+
+    @patch("ml.serving.batch.run_batch_prediction")
+    def test_risk_scoring_capability(self, mock_run):
+        run_batch(capability="risk_scoring")
+
+        mock_run.assert_called_once()
+        assert mock_run.call_args[1]["capability"] == "risk_scoring"
+
+    @patch("ml.serving.batch.run_batch_prediction")
+    def test_custom_batch_size(self, mock_run):
+        run_batch(capability="embedding", batch_size=25)
 
         mock_run.assert_called_once_with(
             capability="embedding",
