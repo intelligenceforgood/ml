@@ -57,7 +57,7 @@ def run_batch_prediction(
     # Default source query
     if source_query is None:
         source_query = f"""
-            SELECT c.case_id, c.narrative AS text,
+            SELECT c.case_id,
                    f.text_length, f.word_count, f.entity_count,
                    f.has_crypto_wallet, f.has_bank_account, f.has_phone, f.has_email,
                    f.classification_axis_count, f.current_classification_conf

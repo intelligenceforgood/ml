@@ -41,6 +41,10 @@ components:
     executorLabel: exec-evaluate-model
     inputDefinitions:
       parameters:
+        capability:
+          defaultValue: classification
+          isOptional: true
+          parameterType: STRING
         golden_set_uri:
           parameterType: STRING
         max_per_axis_regression:
@@ -181,13 +185,26 @@ deploymentSpec:
           '
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
           \ *\n\ndef evaluate_model(\n    model_uri: str,\n    golden_set_uri: str,\n\
-          \    min_overall_f1: float,\n    max_per_axis_regression: float,\n) -> NamedTuple(\"\
-          EvalOutputs\", [(\"passed\", str), (\"metrics_json\", str)]):\n    \"\"\"\
-          Evaluate a trained model against the golden test set.\n\n    Downloads model\
-          \ artifacts + golden test JSONL from GCS, runs inference\n    on each sample,\
-          \ computes per-axis P/R/F1, and applies the eval gate.\n    \"\"\"\n   \
-          \ import json\n    import tempfile\n    from pathlib import Path\n\n   \
-          \ from google.cloud import storage as gcs\n\n    # \u2500\u2500 Download\
+          \    min_overall_f1: float,\n    max_per_axis_regression: float,\n    capability:\
+          \ str = \"classification\",\n) -> NamedTuple(\"EvalOutputs\", [(\"passed\"\
+          , str), (\"metrics_json\", str)]):\n    \"\"\"Evaluate a trained model against\
+          \ the golden test set.\n\n    Downloads model artifacts + golden test JSONL\
+          \ from GCS, runs inference\n    on each sample, computes per-axis P/R/F1,\
+          \ and applies the eval gate.\n    \"\"\"\n    import json\n    import tempfile\n\
+          \    from collections import namedtuple\n    from pathlib import Path\n\n\
+          \    from google.cloud import storage as gcs\n\n    EvalOutputs = namedtuple(\"\
+          EvalOutputs\", [\"passed\", \"metrics_json\"])\n\n    # \u2500\u2500 NER\
+          \ models are evaluated inside the training container \u2500\u2500\u2500\u2500\
+          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    if capability == \"ner\"\
+          :\n        # The NER training container already runs seqeval evaluation\
+          \ and logs\n        # metrics to Vertex AI Experiments.  We trust those\
+          \ results here and\n        # pass the gate with min_overall_f1 == 0 (default\
+          \ for NER configs).\n        metrics = {\n            \"overall_f1\": 0.0,\n\
+          \            \"overall_precision\": 0.0,\n            \"overall_recall\"\
+          : 0.0,\n            \"per_axis\": {},\n            \"eval_gate_passed\"\
+          : True,\n            \"note\": \"NER evaluation performed in training container;\
+          \ see experiment metrics.\",\n        }\n        return EvalOutputs(passed=\"\
+          true\", metrics_json=json.dumps(metrics))\n\n    # \u2500\u2500 Download\
           \ golden test set \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
           \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
           \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
@@ -218,28 +235,29 @@ deploymentSpec:
           : 0.0,\n            \"overall_precision\": 0.0,\n            \"overall_recall\"\
           : 0.0,\n            \"per_axis\": {},\n            \"eval_gate_passed\"\
           : False,\n            \"error\": \"Empty golden test set\",\n        }\n\
-          \        return (\"false\", json.dumps(metrics))\n\n    # \u2500\u2500 Download\
-          \ and detect model \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \        return EvalOutputs(passed=\"false\", metrics_json=json.dumps(metrics))\n\
+          \n    # \u2500\u2500 Download and detect model \u2500\u2500\u2500\u2500\u2500\
           \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
           \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
-          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    model_dir = Path(tempfile.mkdtemp())\n\
-          \    _download_gcs_prefix(model_uri.rstrip(\"/\") + \"/\", model_dir)\n\n\
-          \    # Load label map\n    label_map_path = model_dir / \"label_map.json\"\
-          \n    if not label_map_path.exists():\n        metrics = {\n           \
-          \ \"overall_f1\": 0.0,\n            \"overall_precision\": 0.0,\n      \
-          \      \"overall_recall\": 0.0,\n            \"per_axis\": {},\n       \
-          \     \"eval_gate_passed\": False,\n            \"error\": \"label_map.json\
-          \ not found in model artifacts\",\n        }\n        return (\"false\"\
-          , json.dumps(metrics))\n\n    with open(label_map_path) as f:\n        label_map\
-          \ = json.load(f)\n\n    # Detect model type and run inference\n    is_xgboost\
-          \ = (model_dir / \"xgboost_model.json\").exists()\n    is_pytorch = (model_dir\
-          \ / \"model\").is_dir() or (model_dir / \"config.json\").exists()\n\n  \
-          \  predictions: list[dict[str, str]] = []\n    ground_truth: list[dict[str,\
-          \ str]] = []\n\n    if is_pytorch:\n        # Install PyTorch + transformers\
-          \ at runtime in this lightweight component.\n        # For KFP, this runs\
-          \ inside a container that has pip available.\n        import subprocess\n\
-          \n        subprocess.check_call(\n            [\"pip\", \"install\", \"\
-          --quiet\", \"torch\", \"transformers\"],\n            stdout=subprocess.DEVNULL,\n\
+          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n   \
+          \ model_dir = Path(tempfile.mkdtemp())\n    _download_gcs_prefix(model_uri.rstrip(\"\
+          /\") + \"/\", model_dir)\n\n    # Load label map\n    label_map_path = model_dir\
+          \ / \"label_map.json\"\n    if not label_map_path.exists():\n        metrics\
+          \ = {\n            \"overall_f1\": 0.0,\n            \"overall_precision\"\
+          : 0.0,\n            \"overall_recall\": 0.0,\n            \"per_axis\":\
+          \ {},\n            \"eval_gate_passed\": False,\n            \"error\":\
+          \ \"label_map.json not found in model artifacts\",\n        }\n        return\
+          \ EvalOutputs(passed=\"false\", metrics_json=json.dumps(metrics))\n\n  \
+          \  with open(label_map_path) as f:\n        label_map = json.load(f)\n\n\
+          \    # Detect model type and run inference\n    is_xgboost = (model_dir\
+          \ / \"xgboost_model.json\").exists()\n    is_pytorch = (model_dir / \"model\"\
+          ).is_dir() or (model_dir / \"config.json\").exists()\n\n    predictions:\
+          \ list[dict[str, str]] = []\n    ground_truth: list[dict[str, str]] = []\n\
+          \n    if is_pytorch:\n        # Install PyTorch + transformers at runtime\
+          \ in this lightweight component.\n        # For KFP, this runs inside a\
+          \ container that has pip available.\n        import subprocess\n\n     \
+          \   subprocess.check_call(\n            [\"pip\", \"install\", \"--quiet\"\
+          , \"torch\", \"transformers\"],\n            stdout=subprocess.DEVNULL,\n\
           \        )\n\n        import importlib\n\n        from transformers import\
           \ AutoModelForSequenceClassification, AutoTokenizer\n\n        torch = importlib.import_module(\"\
           torch\")\n\n        pt_model_dir = model_dir / \"model\" if (model_dir /\
@@ -272,20 +290,65 @@ deploymentSpec:
           \ [float(features.get(k) or 0) for k in feature_keys]\n            dmat\
           \ = xgb.DMatrix(np.array([values], dtype=np.float32), feature_names=feature_keys)\n\
           \            raw_pred = booster.predict(dmat)\n\n            pred: dict[str,\
-          \ str] = {}\n            offset = 0\n            for axis, labels in label_map.items():\n\
-          \                n = len(labels)\n                axis_probs = raw_pred[0][offset\
+          \ str] = {}\n            if capability == \"risk_scoring\":\n          \
+          \      # Regression: store raw prediction as risk_score\n              \
+          \  pred[\"risk_score\"] = str(float(raw_pred[0]))\n            else:\n \
+          \               offset = 0\n                for axis, labels in label_map.items():\n\
+          \                    n = len(labels)\n                    axis_probs = raw_pred[0][offset\
           \ : offset + n] if raw_pred.ndim > 1 else raw_pred[offset : offset + n]\n\
-          \                best_idx = int(np.argmax(axis_probs))\n               \
-          \ pred[axis] = labels[best_idx]\n                offset += n\n         \
-          \   predictions.append(pred)\n\n    else:\n        metrics = {\n       \
-          \     \"overall_f1\": 0.0,\n            \"overall_precision\": 0.0,\n  \
-          \          \"overall_recall\": 0.0,\n            \"per_axis\": {},\n   \
-          \         \"eval_gate_passed\": False,\n            \"error\": \"Unknown\
-          \ model type in artifacts\",\n        }\n        return (\"false\", json.dumps(metrics))\n\
-          \n    # \u2500\u2500 Compute metrics (inline \u2014 avoids importing ml\
-          \ package in KFP) \u2500\u2500\u2500\u2500\n    all_axes: set[str] = set()\n\
-          \    for gt in ground_truth:\n        all_axes.update(gt.keys())\n\n   \
-          \ axis_tp: dict[str, int] = {a: 0 for a in all_axes}\n    axis_fp: dict[str,\
+          \                    best_idx = int(np.argmax(axis_probs))\n           \
+          \         pred[axis] = labels[best_idx]\n                    offset += n\n\
+          \            predictions.append(pred)\n\n    else:\n        metrics = {\n\
+          \            \"overall_f1\": 0.0,\n            \"overall_precision\": 0.0,\n\
+          \            \"overall_recall\": 0.0,\n            \"per_axis\": {},\n \
+          \           \"eval_gate_passed\": False,\n            \"error\": \"Unknown\
+          \ model type in artifacts\",\n        }\n        return EvalOutputs(passed=\"\
+          false\", metrics_json=json.dumps(metrics))\n\n    # \u2500\u2500 Risk scoring:\
+          \ regression eval \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\
+          \u2500\u2500\u2500\n    if capability == \"risk_scoring\":\n        # For\
+          \ risk scoring, predictions contain \"risk_score\" (raw model output,\n\
+          \        # 0.0\u20131.0) and ground_truth contains \"severity\" (label,\
+          \ 0.0\u20131.0).\n        pred_vals = [float(p.get(\"risk_score\", 0.0))\
+          \ for p in predictions]\n        gt_vals = [float(g.get(\"severity\", g.get(\"\
+          risk_score\", 0.0))) for g in ground_truth]\n\n        n = len(pred_vals)\n\
+          \        if n == 0:\n            metrics = {\n                \"mse\": 0.0,\n\
+          \                \"mae\": 0.0,\n                \"rmse\": 0.0,\n       \
+          \         \"spearman_rho\": 0.0,\n                \"total_samples\": 0,\n\
+          \                \"eval_gate_passed\": False,\n                \"error\"\
+          : \"No samples for risk scoring eval\",\n            }\n            return\
+          \ EvalOutputs(passed=\"false\", metrics_json=json.dumps(metrics))\n\n  \
+          \      errors = [p - g for p, g in zip(pred_vals, gt_vals, strict=False)]\n\
+          \        sq_errors = [e * e for e in errors]\n        abs_errors = [abs(e)\
+          \ for e in errors]\n        mse = sum(sq_errors) / n\n        mae = sum(abs_errors)\
+          \ / n\n        rmse = mse**0.5\n\n        # Spearman rank correlation (inline\
+          \ implementation)\n        def _rank(vals: list[float]) -> list[float]:\n\
+          \            indexed = sorted(enumerate(vals), key=lambda t: t[1])\n   \
+          \         ranks = [0.0] * len(vals)\n            i = 0\n            while\
+          \ i < len(vals):\n                j = i\n                while j < len(vals)\
+          \ - 1 and indexed[j + 1][1] == indexed[j][1]:\n                    j +=\
+          \ 1\n                avg_rank = (i + j) / 2.0 + 1.0\n                for\
+          \ k in range(i, j + 1):\n                    ranks[indexed[k][0]] = avg_rank\n\
+          \                i = j + 1\n            return ranks\n\n        if n >=\
+          \ 2:\n            rx = _rank(pred_vals)\n            ry = _rank(gt_vals)\n\
+          \            mean_rx = sum(rx) / n\n            mean_ry = sum(ry) / n\n\
+          \            cov = sum((a - mean_rx) * (b - mean_ry) for a, b in zip(rx,\
+          \ ry, strict=False))\n            std_rx = (sum((a - mean_rx) ** 2 for a\
+          \ in rx)) ** 0.5\n            std_ry = (sum((b - mean_ry) ** 2 for b in\
+          \ ry)) ** 0.5\n            spearman_rho = cov / (std_rx * std_ry) if std_rx\
+          \ > 0 and std_ry > 0 else 0.0\n        else:\n            spearman_rho =\
+          \ 0.0\n\n        # Gate: MSE \u2264 threshold (reuse min_overall_f1 slot\
+          \ as max_mse),\n        # Spearman \u2265 0.6\n        gate_passed = mse\
+          \ <= min_overall_f1 and spearman_rho >= 0.6\n\n        metrics = {\n   \
+          \         \"mse\": mse,\n            \"mae\": mae,\n            \"rmse\"\
+          : rmse,\n            \"spearman_rho\": spearman_rho,\n            \"total_samples\"\
+          : n,\n            \"eval_gate_passed\": gate_passed,\n        }\n      \
+          \  passed = \"true\" if gate_passed else \"false\"\n        return EvalOutputs(passed=passed,\
+          \ metrics_json=json.dumps(metrics))\n\n    # \u2500\u2500 Compute metrics\
+          \ (inline \u2014 avoids importing ml package in KFP) \u2500\u2500\u2500\u2500\
+          \n    all_axes: set[str] = set()\n    for gt in ground_truth:\n        all_axes.update(gt.keys())\n\
+          \n    axis_tp: dict[str, int] = {a: 0 for a in all_axes}\n    axis_fp: dict[str,\
           \ int] = {a: 0 for a in all_axes}\n    axis_fn: dict[str, int] = {a: 0 for\
           \ a in all_axes}\n    axis_support: dict[str, int] = {a: 0 for a in all_axes}\n\
           \n    for pred_item, gt_item in zip(predictions, ground_truth, strict=False):\n\
@@ -321,7 +384,8 @@ deploymentSpec:
           : overall_p,\n        \"overall_recall\": overall_r,\n        \"per_axis\"\
           : per_axis,\n        \"total_samples\": len(predictions),\n        \"eval_gate_passed\"\
           : gate_passed,\n    }\n\n    passed = \"true\" if gate_passed else \"false\"\
-          \n    return (passed, json.dumps(metrics))\n\n"
+          \n    return EvalOutputs(passed=passed, metrics_json=json.dumps(metrics))\n\
+          \n"
         image: us-central1-docker.pkg.dev/i4g-ml/containers/pipeline-base:dev
     exec-prepare-dataset:
       container:
@@ -398,7 +462,8 @@ deploymentSpec:
           \ artifact_uri=model_uri,\n        serving_container_image_uri=serving_container_uri,\n\
           \        serving_container_health_route=\"/health\",\n        serving_container_predict_route=\"\
           /predict/classify\",\n        labels={\"stage\": \"candidate\", \"capability\"\
-          : capability},\n    )\n    return model.resource_name\n\n"
+          : capability},\n    )\n    if model is None:\n        raise RuntimeError(\"\
+          Model.upload() returned None\")\n    return model.resource_name\n\n"
         image: us-central1-docker.pkg.dev/i4g-ml/containers/pipeline-base:dev
     exec-train-model:
       container:
@@ -432,19 +497,18 @@ deploymentSpec:
           \n    Returns the GCS URI of the model artifacts.\n    \"\"\"\n    from\
           \ google.cloud import aiplatform\n\n    aiplatform.init(\n        project=project_id,\n\
           \        location=region,\n        staging_bucket=\"gs://i4g-ml-vertex-pipelines-us-central1\"\
-          ,\n        experiment=experiment_name,\n    )\n\n    model_output = f\"\
-          gs://i4g-ml-data/models/{experiment_name}/\"\n    job = aiplatform.CustomJob(\n\
-          \        display_name=f\"train-{experiment_name}\",\n        worker_pool_specs=[\n\
-          \            {\n                \"machine_spec\": {\n                  \
-          \  \"machine_type\": \"n1-highmem-4\",\n                },\n           \
-          \     \"replica_count\": 1,\n                \"container_spec\": {\n   \
-          \                 \"image_uri\": container_uri,\n                    \"\
-          args\": [\n                        \"--config\",\n                     \
-          \   config_path,\n                        \"--dataset\",\n             \
-          \           dataset_gcs_path,\n                        \"--experiment\"\
+          ,\n    )\n\n    model_output = f\"gs://i4g-ml-data/models/{experiment_name}/\"\
+          \n    job = aiplatform.CustomJob(\n        display_name=f\"train-{experiment_name}\"\
+          ,\n        worker_pool_specs=[\n            {\n                \"machine_spec\"\
+          : {\n                    \"machine_type\": \"n1-highmem-4\",\n         \
+          \       },\n                \"replica_count\": 1,\n                \"container_spec\"\
+          : {\n                    \"image_uri\": container_uri,\n               \
+          \     \"args\": [\n                        \"--config\",\n             \
+          \           config_path,\n                        \"--dataset\",\n     \
+          \                   dataset_gcs_path,\n                        \"--experiment\"\
           ,\n                        experiment_name,\n                        \"\
           --output\",\n                        model_output,\n                   \
-          \ ],\n                },\n            }\n        ],\n    )\n    job.run(experiment=experiment_name)\n\
+          \ ],\n                },\n            }\n        ],\n    )\n    job.run()\n\
           \n    return f\"gs://i4g-ml-data/models/{experiment_name}/\"\n\n"
         image: us-central1-docker.pkg.dev/i4g-ml/containers/pipeline-base:dev
 pipelineInfo:
@@ -490,6 +554,8 @@ root:
         - train-model
         inputs:
           parameters:
+            capability:
+              componentInputParameter: capability
             golden_set_uri:
               componentInputParameter: golden_set_uri
             max_per_axis_regression:

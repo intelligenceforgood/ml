@@ -31,6 +31,12 @@ def submit(
     Auto-compiles KFP YAML if the pipeline source is newer. Uploads config
     to GCS and maps framework to the correct training container image.
     """
+    # Guard against direct Python calls where typer.Option defaults are OptionInfo objects
+    if not isinstance(trigger_reason, str):
+        trigger_reason = "manual"
+    if not isinstance(image_tag, str):
+        image_tag = "dev"
+
     from datetime import UTC, datetime
 
     import yaml
@@ -74,7 +80,11 @@ def submit(
         "pytorch": f"{REGISTRY}/train-pytorch:{image_tag}",
         "xgboost": f"{REGISTRY}/train-xgboost:{image_tag}",
     }
-    container_uri = framework_container_map.get(framework, f"{REGISTRY}/train-pytorch:{image_tag}")
+    # NER uses a dedicated training container regardless of framework setting
+    if capability == "ner":
+        container_uri = f"{REGISTRY}/train-ner:{image_tag}"
+    else:
+        container_uri = framework_container_map.get(framework, f"{REGISTRY}/train-pytorch:{image_tag}")
 
     experiment_name = experiment
     if not experiment_name:
@@ -97,7 +107,12 @@ def submit(
         "config_path": f"gs://i4g-ml-data/configs/{config.name}" if config else "",
         "golden_set_uri": f"gs://i4g-ml-data/datasets/{capability}/golden/test.jsonl",
         "endpoint_name": "serving-dev",
-        "min_overall_f1": eval_gate.get("min_overall_f1", 0.0),
+        # For risk_scoring, min_overall_f1 slot is repurposed as max_mse threshold
+        "min_overall_f1": (
+            eval_gate.get("max_mse", eval_gate.get("min_overall_f1", 0.0))
+            if capability == "risk_scoring"
+            else eval_gate.get("min_overall_f1", 0.0)
+        ),
         "max_per_axis_regression": eval_gate.get("max_per_axis_regression", 0.05),
         "machine_type": resources.get("machine_type", "n1-standard-4"),
         "min_replicas": 0,

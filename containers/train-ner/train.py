@@ -193,7 +193,7 @@ def train(config: dict, train_data: list[dict], eval_data: list[dict]) -> Path:
         greater_is_better=True,
         logging_steps=50,
         fp16=use_gpu,
-        no_cuda=not use_gpu,
+        use_cpu=not use_gpu,
     )
 
     data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer, padding=True)
@@ -333,7 +333,10 @@ def main() -> None:
     project = config.get("project_id", "i4g-ml")
     region = config.get("region", "us-central1")
     aiplatform.init(project=project, location=region, experiment=args.experiment)
-    aiplatform.start_run(args.experiment)
+    try:
+        aiplatform.start_run("train", resume=True)
+    except Exception:
+        aiplatform.start_run("train")
 
     train_data = load_ner_dataset(args.dataset, "train")
     eval_data = load_ner_dataset(args.dataset, "eval")

@@ -228,17 +228,18 @@ def route_prediction_cost_aware(
         cheapest = select_cheapest_model(capability, cost_profiles, quality_bar=quality_bar)
         if cheapest:
             # Map the cheapest model to the appropriate variant
-            variant = "champion"  # default
             routing_reason = f"cost_aware:model={cheapest.model_id},cost={cheapest.cost_per_prediction:.4f}"
 
-            # If the cheapest is the challenger model, route there
-            if (
-                challenger_ready
-                and traffic_config
-                and traffic_config.challenger_artifact_uri
-                and cheapest.model_id != "champion"
-            ):
+            # Determine variant by matching model_id against loaded champion
+            from ml.serving.predict import _MODEL_STATE
+
+            champion_model_id = _MODEL_STATE.get("model_id", "")
+            if cheapest.model_id == champion_model_id:
+                variant = "champion"
+            elif challenger_ready and traffic_config and traffic_config.challenger_artifact_uri:
                 variant = "challenger"
+            else:
+                variant = "champion"  # fallback if challenger not ready
 
             return RoutingDecision(
                 variant=variant,

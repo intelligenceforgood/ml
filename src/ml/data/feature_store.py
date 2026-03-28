@@ -103,7 +103,7 @@ def sync_features_to_store(
             "classification_axis_count",
             "current_classification_conf",
         ],
-        feature_time="case_id",
+        feature_time="_computed_at",
         bq_source_uri=source_table,
         entity_id_field="case_id",
     )

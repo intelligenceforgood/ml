@@ -137,7 +137,7 @@ def rebuild_index_from_bq(project_id: str | None = None) -> SimilarityIndex:
     client = bigquery.Client(project=project_id)
     query = f"""
         SELECT case_id, embedding
-        FROM `{project_id}.{dataset}.case_embeddings`
+        FROM `{project_id}.{dataset}.features_case_embeddings`
         ORDER BY case_id
     """
     rows = list(client.query(query).result())

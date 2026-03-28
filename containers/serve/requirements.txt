@@ -9,3 +9,5 @@ torch>=2.1
 transformers>=4.38
 xgboost>=2.0
 numpy>=1.26
+faiss-cpu>=1.7
+sentence-transformers>=2.2

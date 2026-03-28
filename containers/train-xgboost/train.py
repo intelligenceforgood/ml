@@ -233,6 +233,8 @@ def _train_regressor(
     output_dir = Path("/tmp/model_output")
     output_dir.mkdir(parents=True, exist_ok=True)
     model.save_model(str(output_dir / "xgboost_model.json"))
+    with open(output_dir / "label_map.json", "w") as f:
+        json.dump({}, f)
     with open(output_dir / "feature_cols.json", "w") as f:
         json.dump(feature_cols, f)
     with open(output_dir / "metrics.json", "w") as f:
