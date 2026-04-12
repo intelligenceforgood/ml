@@ -822,7 +822,8 @@ _NER_LOAD_FAILED = False
 def load_ner_model(artifact_uri: str) -> None:
     """Load NER model artifacts from GCS.
 
-    Sets ``_NER_LOAD_FAILED`` on error so the server can serve 503 for NER.
+    Downloads from ``gs://`` URI to a temp dir.  Sets ``_NER_LOAD_FAILED``
+    on error so the server can serve 503 for NER.
     """
     global _NER_LOAD_FAILED  # noqa: PLW0603
 
