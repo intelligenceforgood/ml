@@ -1,0 +1,67 @@
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env/
+build/
+dist/
+*.egg-info/
+
+# Testing & Coverage
+.tox/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Machine Learning Data, Models, & Logs
+# (Prevents AI from reading massive binary weights or dataset files)
+data/
+datasets/
+models/
+checkpoints/
+logs/
+tb_logs/
+wandb/
+mlruns/
+*.csv
+*.tsv
+*.dat
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+*.npy
+*.npz
+*.pt
+*.pth
+*.onnx
+*.tflite
+*.pb
+*.ckpt
+*.safetensors
+
+# Variable overrides, Secrets & Keys
+credentials/
+secrets/
+*.json
+*.pem
+*.key
+*.crt
+.env.local
+.env.*.local
+
+# OS, IDE, and Version Control
+.DS_Store
+.vscode/
+.idea/
+.git/
+*.ipynb_checkpoints/
+
+# Large Media / Documentation Assets
+*.png
+*.jpg
+*.jpeg
+*.pdf
